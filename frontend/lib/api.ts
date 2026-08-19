@@ -99,7 +99,7 @@ export const api = {
     }),
 
   chatStream: async (
-    params: { question: string; history: { role: string; content: string }[]; pattern: string; source: string; paperOpts: string },
+    params: { question: string; history: { role: string; content: string }[]; pattern: string; source: string; refs?: string[] },
     handlers: { onToken: (t: string) => void; onNotice: (n: string) => void; onDone: (meta: StreamMeta) => void },
     signal?: AbortSignal,
   ): Promise<void> => {
@@ -111,7 +111,7 @@ export const api = {
         history: params.history,
         pattern: params.pattern,
         source: params.source,
-        paper_opts: params.paperOpts,
+        sources: params.refs ?? [],
       }),
       signal,
     });

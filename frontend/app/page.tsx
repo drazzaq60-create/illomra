@@ -34,6 +34,7 @@ type Convo = {
   patternName?: string;
   patternId?: string;     // stored .docx sample — export clones the real file
   patternLayout?: PaperLayout; // visual spec from a photo sample
+  refs?: string[];        // exam-paper reference documents ([] / unset = all materials)
 };
 
 const MD =
@@ -164,9 +165,6 @@ export default function Home() {
   const [quizLoading, setQuizLoading] = useState(false);
   const [quizCount, setQuizCount] = useState(5);
   const [patternLoading, setPatternLoading] = useState(false);
-  const [paperKey, setPaperKey] = useState(true);
-  const [paperDifficulty, setPaperDifficulty] = useState("");
-  const [paperMarks, setPaperMarks] = useState("");
   const [listening, setListening] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -414,15 +412,11 @@ export default function Home() {
   }
 
   /* ── Chat ── */
-  function composePaperOpts(): string {
-    if (!isPaper) return "";
-    const parts: string[] = [];
-    parts.push(paperKey
-      ? "Include a full answer key and marking scheme at the end, under '## Answer Key & Marking Scheme'."
-      : "Do not include an answer key.");
-    if (paperDifficulty) parts.push(`Difficulty mix: ${paperDifficulty}.`);
-    if (paperMarks.trim()) parts.push(`Total marks: ${paperMarks.trim()}.`);
-    return parts.join(" ");
+  function toggleRef(sourceName: string) {
+    if (!current) return;
+    const refs = current.refs ?? [];
+    const next = refs.includes(sourceName) ? refs.filter((r) => r !== sourceName) : [...refs, sourceName];
+    updateConvo(current.id, { refs: next });
   }
 
   async function send(question: string) {
@@ -458,7 +452,8 @@ export default function Home() {
     };
     try {
       await api.chatStream(
-        { question: q, history, pattern: isPaper ? pattern : "", source: effectiveScope, paperOpts: composePaperOpts() },
+        // Paper mode uses its own reference list (chips); main chat uses the scope dropdown.
+        { question: q, history, pattern: isPaper ? pattern : "", source: isPaper ? "" : effectiveScope, refs: isPaper ? (current?.refs ?? []).filter((r) => docs.some((d) => d.source === r)) : [] },
         {
           onToken: (tok) => {
             if (!started) {
@@ -653,30 +648,50 @@ export default function Home() {
         </div>
 
         <div className="mt-3 px-2 flex-1 overflow-y-auto">
-          <div className="px-2 text-[11px] uppercase tracking-wider text-gray-400 mb-1">Chats</div>
-          {[...convos].sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)).map((c) => (
-            <div key={c.id} className={`group flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm cursor-pointer transition ${c.id === currentId ? "bg-indigo-50 text-indigo-900" : "text-gray-600 hover:bg-gray-100"}`} onClick={() => { setCurrentId(c.id); setSidebarOpen(false); }}>
-              <span className={`shrink-0 ${c.id === currentId ? "text-indigo-500" : "text-gray-400"}`}>{c.kind === "paper" ? <FileText size={13} /> : <MessageSquare size={13} />}</span>
-              {renamingId === c.id ? (
-                <input
-                  autoFocus
-                  value={renameValue}
-                  onChange={(e) => setRenameValue(e.target.value)}
-                  onClick={(e) => e.stopPropagation()}
-                  onKeyDown={(e) => { if (e.key === "Enter") commitRename(); if (e.key === "Escape") setRenamingId(null); }}
-                  onBlur={commitRename}
-                  className="flex-1 min-w-0 bg-white border border-indigo-400 rounded px-1 py-0.5 text-sm outline-none"
-                />
-              ) : (
-                <span className="truncate flex-1 inline-flex items-center gap-1">{c.pinned && <Pin size={11} className="text-indigo-500 shrink-0" />}{c.title || "Untitled"}</span>
-              )}
-              <div className="opacity-100 md:opacity-0 md:group-hover:opacity-100 flex items-center gap-1.5 shrink-0">
-                <button onClick={(e) => { e.stopPropagation(); togglePin(c.id); }} title={c.pinned ? "Unpin" : "Pin"} aria-label={c.pinned ? "Unpin chat" : "Pin chat"} className="text-gray-400 hover:text-indigo-600"><Pin size={13} /></button>
-                <button onClick={(e) => { e.stopPropagation(); startRename(c); }} title="Rename" aria-label="Rename chat" className="text-gray-400 hover:text-gray-700"><Pencil size={13} /></button>
-                <button onClick={(e) => { e.stopPropagation(); deleteChat(c.id); }} title="Delete" aria-label="Delete chat" className="text-gray-400 hover:text-red-500"><Trash2 size={13} /></button>
+          {(() => {
+            const row = (c: Convo) => (
+              <div key={c.id} className={`group flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm cursor-pointer transition ${c.id === currentId ? "bg-indigo-50 text-indigo-900" : "text-gray-600 hover:bg-gray-100"}`} onClick={() => { setCurrentId(c.id); setSidebarOpen(false); }}>
+                <span className={`shrink-0 ${c.id === currentId ? "text-indigo-500" : "text-gray-400"}`}>{c.kind === "paper" ? <FileText size={13} /> : <MessageSquare size={13} />}</span>
+                {renamingId === c.id ? (
+                  <input
+                    autoFocus
+                    value={renameValue}
+                    onChange={(e) => setRenameValue(e.target.value)}
+                    onClick={(e) => e.stopPropagation()}
+                    onKeyDown={(e) => { if (e.key === "Enter") commitRename(); if (e.key === "Escape") setRenamingId(null); }}
+                    onBlur={commitRename}
+                    className="flex-1 min-w-0 bg-white border border-indigo-400 rounded px-1 py-0.5 text-sm outline-none"
+                  />
+                ) : (
+                  <span className="truncate flex-1 inline-flex items-center gap-1">{c.pinned && <Pin size={11} className="text-indigo-500 shrink-0" />}{c.title || "Untitled"}</span>
+                )}
+                <div className="opacity-100 md:opacity-0 md:group-hover:opacity-100 flex items-center gap-1.5 shrink-0">
+                  <button onClick={(e) => { e.stopPropagation(); togglePin(c.id); }} title={c.pinned ? "Unpin" : "Pin"} aria-label={c.pinned ? "Unpin chat" : "Pin chat"} className="text-gray-400 hover:text-indigo-600"><Pin size={13} /></button>
+                  <button onClick={(e) => { e.stopPropagation(); startRename(c); }} title="Rename" aria-label="Rename chat" className="text-gray-400 hover:text-gray-700"><Pencil size={13} /></button>
+                  <button onClick={(e) => { e.stopPropagation(); deleteChat(c.id); }} title="Delete" aria-label="Delete chat" className="text-gray-400 hover:text-red-500"><Trash2 size={13} /></button>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+            const byPin = (a: Convo, b: Convo) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0);
+            const chats = convos.filter((c) => c.kind !== "paper").sort(byPin);
+            const papers = convos.filter((c) => c.kind === "paper").sort(byPin);
+            return (
+              <>
+                {chats.length > 0 && (
+                  <>
+                    <div className="px-2 text-[11px] uppercase tracking-wider text-gray-400 mb-1">Chats</div>
+                    {chats.map(row)}
+                  </>
+                )}
+                {papers.length > 0 && (
+                  <>
+                    <div className="px-2 text-[11px] uppercase tracking-wider text-gray-400 mb-1 mt-3 inline-flex items-center gap-1"><FileText size={10} /> Exam papers</div>
+                    {papers.map(row)}
+                  </>
+                )}
+              </>
+            );
+          })()}
         </div>
 
         {/* My materials — the document manager */}
@@ -790,10 +805,10 @@ export default function Home() {
                 <div className="min-h-[55vh] flex flex-col items-center justify-center text-center gap-4">
                   <div className="h-14 w-14 rounded-2xl bg-indigo-600 text-white grid place-items-center shadow-md shadow-indigo-200"><FileText size={26} /></div>
                   <div className="text-xl text-gray-900 font-semibold tracking-tight">Generate an exam paper from your material</div>
-                  <ol className="text-sm text-gray-600 text-left space-y-1.5 max-w-sm list-decimal pl-5">
-                    <li>Attach a sample/past paper (file or photo) with <Paperclip size={12} className="inline" /> so it copies YOUR institute&apos;s format</li>
-                    <li>Set answer key, difficulty and marks below</li>
-                    <li>Describe the paper — e.g. <span className="text-gray-900 font-medium">&quot;50-mark paper from chapter 3, Q1 scenario-based&quot;</span></li>
+                  <ol className="text-sm text-gray-600 text-left space-y-1.5 max-w-md list-decimal pl-5">
+                    <li>Attach a sample/past paper (file or photo) with <Paperclip size={12} className="inline" /> — it copies YOUR institute&apos;s exact format</li>
+                    <li>Pick which <span className="text-gray-900 font-medium">references</span> to draw from below (or leave all)</li>
+                    <li>Just say it in plain words — <span className="text-gray-900 font-medium">&quot;same pattern as the sample, 3 scenario-based questions from the neural networks part, 50 marks, with answer key&quot;</span></li>
                   </ol>
                   {!contentReady && <p className="text-xs text-gray-400">Tip: add your course material in <span className="text-indigo-600 font-medium">My materials</span> first.</p>}
                 </div>
@@ -975,30 +990,26 @@ export default function Home() {
               ) : (
                 <span className="text-gray-400 inline-flex items-center gap-1"><Paperclip size={11} /> {patternLoading ? "Reading format…" : "no format attached"}</span>
               )}
-              <label className="inline-flex items-center gap-1.5 text-gray-700 cursor-pointer select-none">
-                <input type="checkbox" checked={paperKey} onChange={(e) => setPaperKey(e.target.checked)} className="accent-indigo-600" />
-                Answer key
-              </label>
-              <label className="inline-flex items-center gap-1.5 text-gray-500">
-                Difficulty
-                <select value={paperDifficulty} onChange={(e) => setPaperDifficulty(e.target.value)} className="bg-gray-50 border border-gray-300 rounded px-1.5 py-1 text-gray-700 outline-none">
-                  <option value="">Balanced</option>
-                  <option value="mostly easy">Easy</option>
-                  <option value="mostly medium">Medium</option>
-                  <option value="mostly hard, challenging">Hard</option>
-                </select>
-              </label>
-              <label className="inline-flex items-center gap-1.5 text-gray-500">
-                Marks
-                <input value={paperMarks} onChange={(e) => setPaperMarks(e.target.value)} placeholder="e.g. 50" className="w-16 bg-gray-50 border border-gray-300 rounded px-1.5 py-1 text-gray-700 outline-none placeholder:text-gray-400" />
-              </label>
-              {contentReady && docs.length > 0 && (
-                <select value={effectiveScope} onChange={(e) => setScopeSource(e.target.value)} className="bg-gray-50 border border-gray-300 rounded px-1.5 py-1 text-gray-700 outline-none max-w-[40%] truncate" aria-label="Source material">
-                  <option value="">From: all materials</option>
-                  {docs.map((d) => (
-                    <option key={d.source} value={d.source}>From: {d.source}</option>
-                  ))}
-                </select>
+              {docs.length > 0 && (
+                <span className="inline-flex items-center flex-wrap gap-1.5">
+                  <span className="text-gray-400">References:</span>
+                  {docs.map((d) => {
+                    const refs = current?.refs ?? [];
+                    const active = refs.length === 0 || refs.includes(d.source);
+                    const explicit = refs.includes(d.source);
+                    return (
+                      <button
+                        key={d.source}
+                        onClick={() => toggleRef(d.source)}
+                        title={active ? "Included — click to " + (explicit ? "exclude" : "narrow to specific documents") : "Excluded — click to include"}
+                        className={`px-2 py-1 rounded-lg border transition max-w-[160px] truncate ${active ? "border-indigo-300 bg-indigo-50 text-indigo-700" : "border-gray-200 bg-white text-gray-400 line-through"}`}
+                      >
+                        {shortName(d.source, 20)}
+                      </button>
+                    );
+                  })}
+                  {(current?.refs ?? []).length === 0 && <span className="text-gray-300">(all)</span>}
+                </span>
               )}
             </div>
           )}

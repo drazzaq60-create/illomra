@@ -106,10 +106,10 @@ class _FakeEngine:
     def __init__(self):
         self.calls = []
 
-    def query_stream(self, question, history=None, pattern="", source="", paper_opts=""):
+    def query_stream(self, question, history=None, pattern="", source="", paper_opts="", ref_sources=None):
         self.calls.append({"question": question, "history": history,
                            "pattern": pattern, "source": source,
-                           "paper_opts": paper_opts})
+                           "paper_opts": paper_opts, "ref_sources": ref_sources})
         yield {"token": "Hel"}
         yield {"token": "lo"}
         yield {"done": True, "sources": [], "confidence": 0, "web_used": False,
@@ -137,7 +137,7 @@ def test_chat_stream_contract(monkeypatch):
     assert frames[-1]["done"] is True
     assert "error" not in frames[-1]
     assert fake.calls == [{"question": "hi", "history": [], "pattern": "",
-                           "source": "", "paper_opts": ""}]
+                           "source": "", "paper_opts": "", "ref_sources": None}]
 
     # Error contract the frontend depends on: engine blows up -> still HTTP 200
     # with EXACTLY ONE NDJSON line carrying done==True and an "error" key.

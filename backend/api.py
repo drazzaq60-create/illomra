@@ -194,7 +194,8 @@ class ChatIn(BaseModel):
     history: list = []
     pattern: str = ""     # non-empty switches the engine into document-generator mode
     source: str = ""      # "" = search all documents; otherwise scope to this one
-    paper_opts: str = ""  # teacher's paper options (marks, sections, difficulty, ...)
+    sources: list = []    # exam-paper mode: chosen reference documents ([] = all)
+    paper_opts: str = ""  # legacy free-text paper options (kept for compatibility)
 
 
 class QuizIn(BaseModel):
@@ -451,6 +452,7 @@ def chat_stream(body: ChatIn):
                 pattern=body.pattern,
                 source=body.source,
                 paper_opts=body.paper_opts,
+                ref_sources=[s for s in body.sources if isinstance(s, str) and s] or None,
             ):
                 yield json.dumps(part) + "\n"
         except Exception as e:

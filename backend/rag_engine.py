@@ -710,7 +710,8 @@ class RAGEngine:
                 return f"{prev} {question}"
         return question
 
-    def _effective_k(self, question: str, base_k: int, source: str) -> int:
+    def _effective_k(self, question: str, base_k: int, source: str,
+                     sources: Optional[List[str]] = None) -> int:
         broad_terms = ["explain everything", "explain the whole", "explain the entire",
                        "summarize everything", "summarise everything", "the whole thing",
                        "overview of", "comprehensive", "cover all", "all the concepts",
@@ -718,7 +719,10 @@ class RAGEngine:
         ql = question.lower()
         is_broad = any(t in ql for t in broad_terms)
         if is_broad:
-            # Widen — but only within the scoped document, never across the whole mixed store.
+            # Widen — but only within the scoped document(s), never the whole mixed store.
+            if sources:
+                pool = sum(self.source_counts.get(s, 0) for s in sources)
+                return min(pool or 0, 18)
             pool = self.source_counts.get(source) if source else self.chunk_count
             return min(pool or 0, 18) if source else min(self.chunk_count, 12)
         return base_k
@@ -757,12 +761,17 @@ class RAGEngine:
         return 2500, 6, ("Match the length to the question — concise by default; expand only where "
                          "it genuinely aids understanding.")
 
-    def _gather(self, retrieval_query: str, effective_k: int, source: str):
-        """One retrieval call → (docs kept after threshold, mean-confidence 0-100)."""
+    def _gather(self, retrieval_query: str, effective_k: int, source: str,
+                sources: Optional[List[str]] = None):
+        """One retrieval call → (docs kept after threshold, mean-confidence 0-100).
+        Scope: `sources` (a multi-document reference list, e.g. an exam paper's
+        chosen references) wins over the single `source`; empty = all materials."""
         if not self.vector_store or effective_k <= 0:
             return [], 0
         kwargs = {"k": effective_k}
-        if source:
+        if sources:
+            kwargs["filter"] = {"source": sources[0]} if len(sources) == 1 else {"source": {"$in": list(sources)}}
+        elif source:
             kwargs["filter"] = {"source": source}
         scored = self.vector_store.similarity_search_with_relevance_scores(retrieval_query, **kwargs)
         if not scored:
@@ -915,16 +924,19 @@ class RAGEngine:
             f"Question: {question}\n\nAnswer:"
         )
 
-    def _prepare(self, question, history, source, pattern, paper_opts="", web_override=None):
+    def _prepare(self, question, history, source, pattern, paper_opts="", web_override=None,
+                 ref_sources=None):
         """Everything the query path needs before calling the LLM.
         web_override: search results the MODEL requested (agentic search second
         pass) — injected directly, and the search marker is disabled.
+        ref_sources: multi-document reference list (exam-paper mode) — overrides
+        the single `source` scope.
         Returns (prompt_text, sources, confidence, web_used, max_tokens)."""
         max_tokens, base_k, length_guidance = self._response_tier(question, pattern)
         history_block = self._history_block(history)
         retrieval_query = self._retrieval_query(question, history)
-        effective_k = self._effective_k(question, base_k, source)
-        docs, confidence = self._gather(retrieval_query, effective_k, source)
+        effective_k = self._effective_k(question, base_k, source, sources=ref_sources)
+        docs, confidence = self._gather(retrieval_query, effective_k, source, sources=ref_sources)
         context = self._label_context(docs)
 
         web_results, web_sources, web_block = [], [], ""
@@ -968,17 +980,18 @@ class RAGEngine:
     SEARCH_MARK = "<<SEARCH:"
 
     def query_stream(self, question: str, history=None, pattern: str = "",
-                     source: str = "", paper_opts: str = ""):
+                     source: str = "", paper_opts: str = "", ref_sources=None):
         """The chat path (streaming NDJSON frames). Works with no documents too
         (general-assistant mode).
         - Rate limits/overloads: hops to the next model in the chain instantly.
         - Agentic web search: the MODEL may open its reply with
           '<<SEARCH: query>>' when it decides it lacks the knowledge; we catch
           that before any token reaches the UI, run the search, and re-answer
-          with the results injected (one search round max)."""
+          with the results injected (one search round max).
+        - ref_sources: exam-paper mode's chosen reference documents."""
         start = time.time()
         prompt_text, sources, confidence, web_used, max_tokens = self._prepare(
-            question, history, source, pattern, paper_opts
+            question, history, source, pattern, paper_opts, ref_sources=ref_sources
         )
 
         in_tok, out_tok = 0, 0
@@ -1065,7 +1078,8 @@ class RAGEngine:
                 if not results:
                     yield {"notice": "🌐 Web search found nothing — answering from what I know"}
                 prompt_text, sources, confidence, web_used, max_tokens = self._prepare(
-                    question, history, source, pattern, paper_opts, web_override=results or []
+                    question, history, source, pattern, paper_opts,
+                    web_override=results or [], ref_sources=ref_sources
                 )
                 continue  # phase 1 streams the real answer
             break  # no search requested — we're done
