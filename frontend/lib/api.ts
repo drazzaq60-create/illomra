@@ -204,7 +204,7 @@ export const api = {
     const blob = await res.blob();
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
-    link.download = `studymind-paper.${format}`;
+    link.download = `illomra-paper.${format}`;
     document.body.appendChild(link);
     link.click();
     link.remove();

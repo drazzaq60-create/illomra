@@ -5,8 +5,8 @@ import "./globals.css";
 const inter = Inter({ variable: "--font-sans", subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "StudyMind — AI Study Assistant",
-  description: "Chat with your documents and lectures, and generate quizzes and summaries.",
+  title: "Illomra",
+  description: "Your material. Your answers. Ask your own books and notes, test yourself, and generate exam papers in your institute's exact format.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
