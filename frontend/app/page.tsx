@@ -37,11 +37,12 @@ type Convo = {
   refs?: string[];        // exam-paper reference documents ([] / unset = all materials)
 };
 
-type NavSpace = "learn" | "papers" | "library";
+// Two spaces: Learn (your materials + chats about them) and Paper Studio.
+type NavSpace = "learn" | "papers";
 
-// Each space has its own identity color so users always know where they are.
-// Full literal class strings (Tailwind JIT needs them spelled out).
-const ACCENT: Record<NavSpace, {
+// Identity colors so users always know where they are ("library" = the
+// materials block inside Learn). Full literal class strings for Tailwind JIT.
+const ACCENT: Record<"learn" | "papers" | "library", {
   solid: string; solidHover: string; text: string; soft: string; softBorder: string;
   panelTint: string; ring: string;
 }> = {
@@ -191,6 +192,7 @@ export default function Home() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [url, setUrl] = useState("");
+  const [showAdd, setShowAdd] = useState(false);
   const [usage, setUsage] = useState<Usage | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [quizLoading, setQuizLoading] = useState(false);
@@ -750,7 +752,7 @@ export default function Home() {
 
   /* ── A4 sheet preview (Paper Studio right pane) ── */
   const sheet = previewMsg && (
-    <div className="h-full flex flex-col bg-gray-100/80">
+    <div className="h-full flex flex-col bg-white/25 backdrop-blur-sm">
       <div className="shrink-0 flex items-center justify-between px-4 py-2.5 border-b border-violet-100 bg-violet-50/60">
         <span className="text-xs font-medium text-violet-600 inline-flex items-center gap-1.5"><Eye size={13} /> Paper preview</span>
         <div className="flex items-center gap-2">
@@ -799,15 +801,14 @@ export default function Home() {
         </div>
       )}
 
-      {/* ── Labeled rail ── */}
-      <nav className="w-[76px] shrink-0 flex flex-col items-center border-r border-gray-200 bg-white py-3 gap-1.5 z-40">
+      {/* ── Labeled rail (frosted glass) ── */}
+      <nav className="w-[76px] shrink-0 flex flex-col items-center border-r border-white/60 bg-white/55 backdrop-blur-xl py-3 gap-1.5 z-40">
         <div className="mb-2"><Logo size={36} /></div>
-        {railBtn("learn", <GraduationCap size={19} />, "Learn", "Learn — chat with your material")}
+        {railBtn("learn", <GraduationCap size={19} />, "Learn", "Learn — your materials and chats about them")}
         {railBtn("papers", <FileText size={19} />, "Papers", "Paper Studio — generate exam papers")}
-        {railBtn("library", <BookOpen size={19} />, "Library", "Library — your materials")}
         <div className="flex-1" />
         {quota && (
-          <button onClick={() => { setNav("library"); setSidebarOpen(true); }} title={`AI limit: ≈${quota.totals.used_today}/${quota.totals.capacity} today`} className="mb-0.5 flex flex-col items-center gap-0.5">
+          <button onClick={() => { setNav("learn"); setSidebarOpen(true); }} title={`AI limit: ≈${quota.totals.used_today}/${quota.totals.capacity} today`} className="mb-0.5 flex flex-col items-center gap-0.5">
             <svg width="26" height="26" viewBox="0 0 36 36">
               <circle cx="18" cy="18" r="15" fill="none" stroke="#e5e7eb" strokeWidth="4" />
               <circle cx="18" cy="18" r="15" fill="none" stroke={quotaPct >= 90 ? "#ef4444" : quotaPct >= 65 ? "#f59e0b" : "#6366f1"} strokeWidth="4"
@@ -820,72 +821,71 @@ export default function Home() {
       </nav>
 
       {/* ── Contextual panel ── */}
-      <aside className={`${sidebarOpen ? "flex" : "hidden"} md:flex w-[258px] shrink-0 flex-col border-r border-gray-200 bg-white fixed md:static left-[60px] z-30 h-full`}>
-        {nav === "library" ? (
-          <>
-            <div className={`p-3 flex items-center justify-between border-b ${ACCENT.library.softBorder} ${ACCENT.library.panelTint}`}>
-              <div>
-                <div className={`font-semibold text-[15px] ${ACCENT.library.text} inline-flex items-center gap-1.5`}><BookOpen size={14} /> Library</div>
-                <div className="text-[11px] text-gray-500">Everything Illomra answers from</div>
-              </div>
+      <aside className={`${sidebarOpen ? "flex" : "hidden"} md:flex w-[262px] shrink-0 flex-col border-r border-white/60 bg-white/55 backdrop-blur-xl fixed md:static left-[76px] z-30 h-full`}>
+        <div className={`p-3 flex items-center justify-between border-b ${nav === "papers" ? `${ACCENT.papers.softBorder} ${ACCENT.papers.panelTint}` : `${ACCENT.learn.softBorder} ${ACCENT.learn.panelTint}`}`}>
+          <div>
+            <div className={`font-semibold text-[15px] inline-flex items-center gap-1.5 ${nav === "papers" ? ACCENT.papers.text : ACCENT.learn.text}`}>
+              {nav === "papers" ? <FileText size={14} /> : <GraduationCap size={14} />}
+              {nav === "papers" ? "Paper Studio" : "Learn"}
             </div>
-            <div className="px-3 space-y-2">
-              <label className={`block rounded-xl border-2 border-dashed p-3 text-center cursor-pointer text-xs transition ${busy ? "opacity-50 pointer-events-none" : "border-gray-300 text-gray-600 hover:border-indigo-400 hover:bg-indigo-50/40"}`}>
-                <input type="file" multiple accept=".pdf,.txt,.md,.csv,.docx,.pptx,.png,.jpg,.jpeg,.webp" onChange={handleUpload} className="hidden" disabled={!!busy} />
-                <UploadCloud size={16} className="mx-auto mb-1 text-indigo-500" />
-                Upload files
-                <div className="text-[10px] text-gray-400 mt-0.5">PDF · Word · PPT · photo of notes</div>
-              </label>
-              <div className="flex gap-1">
-                <input value={url} onChange={(e) => setUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") handleUrl(); }} placeholder="Paste a link or YouTube URL" disabled={!!busy} className="flex-1 rounded-lg bg-gray-50 border border-gray-300 outline-none px-2 py-1.5 text-xs placeholder:text-gray-400 focus:border-indigo-400" />
-                <button onClick={handleUrl} disabled={!!busy || !url.trim()} className="px-2 rounded-lg bg-gray-800 text-white text-xs hover:bg-gray-700 disabled:opacity-40" aria-label="Add link"><Link2 size={13} /></button>
-              </div>
-              {busy && <div className="text-[11px] text-indigo-600 animate-pulse">{busy}</div>}
+            <div className="text-[11px] text-gray-500">{nav === "papers" ? "Exam papers in your format" : "Your materials & your chats"}</div>
+          </div>
+          <button onClick={nav === "papers" ? newPaper : newChat} className={`px-2.5 h-8 inline-flex items-center gap-1 rounded-lg text-white transition text-xs font-medium ${nav === "papers" ? `${ACCENT.papers.solid} ${ACCENT.papers.solidHover} shadow-lg shadow-violet-500/25` : `${ACCENT.learn.solid} ${ACCENT.learn.solidHover} shadow-lg shadow-indigo-500/25`}`} title={nav === "papers" ? "New paper" : "New chat"} aria-label="New">
+            <Plus size={14} /> New
+          </button>
+        </div>
+
+        {/* Learn = materials + chats in ONE place (the library IS for learning) */}
+        {nav === "learn" && (
+          <div className="border-b border-emerald-100/80 bg-emerald-50/30 px-3 py-2.5">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-xs font-semibold text-emerald-700 inline-flex items-center gap-1.5"><BookOpen size={13} /> My materials <span className="font-normal text-emerald-600/70">· {docs.length}</span></span>
+              <button onClick={() => setShowAdd((v) => !v)} className="text-[11px] font-medium text-emerald-700 hover:text-emerald-600 px-1.5 py-0.5 rounded border border-emerald-200 bg-white/70">{showAdd ? "Close" : "+ Add"}</button>
             </div>
-            <div className="mt-3 px-3 flex-1 overflow-y-auto">
-              <div className="text-[11px] uppercase tracking-wider text-gray-400 mb-1.5">{docs.length} material{docs.length === 1 ? "" : "s"}</div>
-              {docs.length > 0 ? (
-                <div className="space-y-1">
-                  {docs.map((d) => (
-                    <div key={d.source} className="group flex items-center gap-1.5 text-xs bg-gray-50 border border-gray-100 rounded-lg px-2 py-2">
-                      <FileText size={12} className="shrink-0 text-gray-400" />
-                      <span className="truncate flex-1 text-gray-700" title={`${d.source} · ${d.chunks} sections`}>{d.source}</span>
-                      <button onClick={() => removeDoc(d.source)} title="Remove" aria-label="Remove material" className="opacity-100 md:opacity-0 md:group-hover:opacity-100 text-gray-400 hover:text-red-500 shrink-0"><Trash2 size={12} /></button>
-                    </div>
-                  ))}
-                  <button onClick={clearKnowledge} className="w-full text-[11px] text-gray-400 hover:text-red-500 pt-1 text-left px-2">Clear all materials</button>
+            {showAdd && (
+              <div className="space-y-1.5 mb-2">
+                <label className={`block rounded-xl border-2 border-dashed p-2.5 text-center cursor-pointer text-xs transition bg-white/70 ${busy ? "opacity-50 pointer-events-none" : "border-emerald-300 text-gray-600 hover:border-emerald-400 hover:bg-emerald-50/60"}`}>
+                  <input type="file" multiple accept=".pdf,.txt,.md,.csv,.docx,.pptx,.png,.jpg,.jpeg,.webp" onChange={handleUpload} className="hidden" disabled={!!busy} />
+                  <UploadCloud size={15} className="mx-auto mb-0.5 text-emerald-600" />
+                  Upload files
+                  <div className="text-[10px] text-gray-400 mt-0.5">PDF · Word · PPT · photo of notes</div>
+                </label>
+                <div className="flex gap-1">
+                  <input value={url} onChange={(e) => setUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") handleUrl(); }} placeholder="Paste a link or YouTube URL" disabled={!!busy} className="flex-1 rounded-lg bg-white/80 border border-emerald-200 outline-none px-2 py-1.5 text-xs placeholder:text-gray-400 focus:border-emerald-400" />
+                  <button onClick={handleUrl} disabled={!!busy || !url.trim()} className="px-2 rounded-lg bg-emerald-600 text-white text-xs hover:bg-emerald-500 disabled:opacity-40" aria-label="Add link"><Link2 size={13} /></button>
                 </div>
-              ) : (
-                <div className="text-[11px] text-gray-400">Nothing yet — upload your notes, books, slides, or a photo.</div>
-              )}
-            </div>
-          </>
-        ) : (
-          <>
-            <div className={`p-3 flex items-center justify-between border-b ${nav === "papers" ? `${ACCENT.papers.softBorder} ${ACCENT.papers.panelTint}` : `${ACCENT.learn.softBorder} ${ACCENT.learn.panelTint}`}`}>
-              <div>
-                <div className={`font-semibold text-[15px] inline-flex items-center gap-1.5 ${nav === "papers" ? ACCENT.papers.text : ACCENT.learn.text}`}>
-                  {nav === "papers" ? <FileText size={14} /> : <GraduationCap size={14} />}
-                  {nav === "papers" ? "Paper Studio" : "Learn"}
-                </div>
-                <div className="text-[11px] text-gray-500">{nav === "papers" ? "Exam papers in your format" : "Chat with your material"}</div>
               </div>
-              <button onClick={nav === "papers" ? newPaper : newChat} className={`px-2.5 h-8 inline-flex items-center gap-1 rounded-lg text-white transition shadow-sm text-xs font-medium ${nav === "papers" ? `${ACCENT.papers.solid} ${ACCENT.papers.solidHover}` : `${ACCENT.learn.solid} ${ACCENT.learn.solidHover}`}`} title={nav === "papers" ? "New paper" : "New chat"} aria-label="New">
-                <Plus size={14} /> New
-              </button>
-            </div>
-            <div className="mt-1 px-2 flex-1 overflow-y-auto">
-              {(nav === "papers" ? paperConvos : chatConvos).map(convoRow)}
-              {(nav === "papers" ? paperConvos : chatConvos).length === 0 && (
-                <div className="px-2 text-[11px] text-gray-400">{nav === "papers" ? "No papers yet — hit + to make your first one." : "No chats yet."}</div>
-              )}
-            </div>
-          </>
+            )}
+            {busy && <div className="text-[11px] text-emerald-700 animate-pulse mb-1">{busy}</div>}
+            {docs.length > 0 ? (
+              <div className="space-y-1 max-h-36 overflow-y-auto">
+                {docs.map((d) => (
+                  <div key={d.source} className="group flex items-center gap-1.5 text-xs bg-white/80 border border-emerald-100 rounded-lg px-2 py-1.5">
+                    <FileText size={12} className="shrink-0 text-emerald-500" />
+                    <span className="truncate flex-1 text-gray-700" title={`${d.source} · ${d.chunks} sections`}>{d.source}</span>
+                    <button onClick={() => removeDoc(d.source)} title="Remove" aria-label="Remove material" className="opacity-100 md:opacity-0 md:group-hover:opacity-100 text-gray-400 hover:text-red-500 shrink-0"><Trash2 size={12} /></button>
+                  </div>
+                ))}
+                <button onClick={clearKnowledge} className="w-full text-[10px] text-gray-400 hover:text-red-500 text-left px-1">Clear all materials</button>
+              </div>
+            ) : (
+              !showAdd && <div className="text-[11px] text-gray-500">Nothing yet — hit <span className="text-emerald-700 font-medium">+ Add</span> to upload notes, books, or a photo.</div>
+            )}
+          </div>
         )}
+
+        <div className="mt-1 px-2 flex-1 overflow-y-auto">
+          {nav === "learn" && <div className="px-2 pt-1 text-[11px] uppercase tracking-wider text-gray-400 mb-1">Chats</div>}
+          {nav === "papers" && <div className="px-2 pt-1 text-[11px] text-gray-400 mb-1.5">References come from your Learn materials.</div>}
+          {(nav === "papers" ? paperConvos : chatConvos).map(convoRow)}
+          {(nav === "papers" ? paperConvos : chatConvos).length === 0 && (
+            <div className="px-2 text-[11px] text-gray-400">{nav === "papers" ? "No papers yet — hit + New to make your first one." : "No chats yet — hit + New."}</div>
+          )}
+        </div>
 
         {/* AI limit bar */}
         {quota && quota.totals.capacity > 0 && (
-          <div className="border-t border-gray-200 px-3 py-2.5">
+          <div className="border-t border-white/60 px-3 py-2.5">
             <div className="flex justify-between text-[11px] text-gray-500 mb-1">
               <span>AI limit today</span>
               <span>≈ {quota.totals.used_today} / {quota.totals.capacity}</span>
@@ -913,7 +913,7 @@ export default function Home() {
       <div className="flex-1 flex min-w-0">
         {/* Conversation column */}
         <div className={`flex flex-col min-w-0 ${isPaper && previewMsg ? "flex-1 lg:max-w-[52%]" : "flex-1"}`}>
-          <header className="h-14 shrink-0 border-b border-gray-200 bg-white/80 backdrop-blur flex items-center justify-between px-4 gap-3">
+          <header className="h-14 shrink-0 border-b border-white/60 bg-white/45 backdrop-blur-xl flex items-center justify-between px-4 gap-3">
             <div className="flex items-center gap-2 min-w-0">
               <button onClick={() => setSidebarOpen(true)} className="md:hidden text-gray-500 p-1.5" aria-label="Menu"><Menu size={20} /></button>
               <span className="truncate font-medium text-gray-900">{current?.title || "New chat"}</span>
@@ -954,7 +954,7 @@ export default function Home() {
                       <li>Just say it in plain words — <span className="text-gray-900 font-medium">&quot;same pattern as the sample, 3 scenario-based questions from the neural networks part, 50 marks, with answer key&quot;</span></li>
                     </ol>
                     <p className="text-xs text-gray-400">The paper appears on the right as a real sheet — download Word/PDF from there.</p>
-                    {!contentReady && <p className="text-xs text-gray-400">Tip: add your course material in the <button onClick={() => { setNav("library"); setSidebarOpen(true); }} className="text-indigo-600 font-medium hover:underline">Library</button> first.</p>}
+                    {!contentReady && <p className="text-xs text-gray-400">Tip: add your course material under <button onClick={() => { setNav("learn"); setShowAdd(true); setSidebarOpen(true); }} className="text-emerald-600 font-medium hover:underline">My materials</button> first.</p>}
                   </div>
                 ) : contentReady ? (
                   <div className="min-h-[55vh] flex flex-col items-center justify-center text-center gap-4">
@@ -970,8 +970,11 @@ export default function Home() {
                 ) : (
                   <div className="min-h-[60vh] flex flex-col items-center justify-center gap-6">
                     <div className="flex flex-col items-center gap-2.5">
-                      <Logo size={56} />
-                      <div className="text-2xl font-semibold tracking-tight text-gray-900">Illomra</div>
+                      <div className="relative">
+                        <div className="absolute -inset-6 rounded-full bg-gradient-to-br from-indigo-400/40 via-violet-400/30 to-pink-300/30 blur-2xl" />
+                        <div className="relative"><Logo size={56} /></div>
+                      </div>
+                      <div className="text-2xl font-semibold tracking-tight bg-gradient-to-r from-indigo-700 via-violet-700 to-indigo-700 bg-clip-text text-transparent">Illomra</div>
                       <div className="text-sm text-gray-500 -mt-1.5">Your material. Your answers. Your exam papers.</div>
                     </div>
                     <label
@@ -1021,7 +1024,7 @@ export default function Home() {
                           <div className="text-[11px] text-violet-600 mt-1.5 inline-flex items-center gap-1"><Eye size={11} /> {previewIdx === i ? "Showing in preview →" : "Show in preview →"}</div>
                         </button>
                       ) : (
-                        <div className="rounded-2xl bg-white border border-gray-200 px-4 py-3 shadow-sm">
+                        <div className="rounded-2xl bg-white/85 backdrop-blur border border-white/80 px-4 py-3 shadow-[0_4px_20px_rgba(79,70,229,0.07)]">
                           {m.type === "quiz" ? (
                             <>
                               <div className="text-sm text-gray-500 mb-3">{m.content}</div>
@@ -1077,7 +1080,7 @@ export default function Home() {
 
               {(thinking || quizLoading || summaryLoading) && (
                 <div className="flex justify-start">
-                  <div className="rounded-2xl bg-white border border-gray-200 px-4 py-3 text-gray-400 text-sm flex items-center gap-2.5 shadow-sm">
+                  <div className="rounded-2xl bg-white/85 backdrop-blur border border-white/80 px-4 py-3 text-gray-400 text-sm flex items-center gap-2.5 shadow-[0_4px_20px_rgba(79,70,229,0.07)]">
                     <span className="inline-flex gap-1 text-indigo-400">
                       <span className="animate-bounce">●</span>
                       <span className="animate-bounce [animation-delay:0.15s]">●</span>
@@ -1094,7 +1097,7 @@ export default function Home() {
           </div>
 
           {/* ── Input area ── */}
-          <div className="shrink-0 border-t border-gray-200 bg-white p-3 pb-4">
+          <div className="shrink-0 border-t border-white/60 bg-white/45 backdrop-blur-xl p-3 pb-4">
             {contentReady && docs.length > 0 && !isPaper && (
               <div className="max-w-3xl mx-auto mb-2 flex flex-wrap items-center gap-2 text-xs">
                 <span className="text-gray-400 shrink-0">Answering from:</span>
@@ -1171,7 +1174,7 @@ export default function Home() {
               <button onClick={toggleVoice} disabled={connected === false} title="Voice to text (Chrome/Edge)" className={`h-12 w-12 shrink-0 grid place-items-center rounded-2xl border-2 transition disabled:opacity-40 ${listening ? "bg-red-50 border-red-300 text-red-500 animate-pulse" : "bg-white border-gray-200 text-gray-500 hover:border-indigo-300 hover:text-indigo-600"}`} aria-label="Voice input">
                 <Mic size={18} />
               </button>
-              <div className="flex-1 flex items-end rounded-2xl border-2 border-gray-200 bg-white focus-within:border-indigo-400 focus-within:shadow-[0_0_0_4px_rgba(99,102,241,0.08)] transition shadow-sm">
+              <div className="flex-1 flex items-end rounded-2xl border-2 border-white/80 bg-white/90 backdrop-blur focus-within:border-indigo-400 focus-within:shadow-[0_0_0_4px_rgba(99,102,241,0.15),0_8px_28px_rgba(99,102,241,0.15)] transition shadow-md shadow-indigo-100/60">
                 <textarea
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
