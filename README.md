@@ -1,34 +1,55 @@
 # StudyMind
 
-An AI study assistant: upload documents, YouTube lectures, or web links, then **chat with them**, and auto-generate **quizzes, flashcards, and summaries** — powered by Retrieval-Augmented Generation (RAG).
+**Answers from YOUR material — not the internet.**
 
-Full-stack build: **FastAPI** backend + **Next.js / React** frontend.
+StudyMind is a study & teaching tool for students and teachers, built around
+Retrieval-Augmented Generation (RAG):
+
+- **Students** upload their own textbooks, notes, slides, or lecture links, then
+  ask questions, get **source-cited answers grounded only in that material**,
+  build study notes, and **test themselves** with quizzes that track mistakes
+  and re-quiz on weak spots.
+- **Teachers** attach a sample/past paper and generate **new exam papers in
+  their institute's exact format** — with answer key & marking scheme,
+  difficulty mix, total-marks control, and A/B variants — exported to Word/PDF.
+
+That grounding + paper generation is what separates it from a generic
+ChatGPT/Claude wrapper: it works from *your* documents, scoped per document,
+and shows which source every answer came from.
+
+Full-stack: **FastAPI** backend + **Next.js / React** frontend.
 
 ## Project structure
 ```
 studymind/
-├── backend/              # FastAPI API (Python) — the server
-│   ├── api.py               # API endpoints: /chat, /upload, /quiz, /summary, ...
-│   ├── rag_engine.py        # the RAG "brain": Groq LLM, ChromaDB, HF embeddings
-│   ├── requirements.txt     # Python dependencies
-│   ├── .env.example         # template — copy to .env and add your key
-│   └── .env                 # your GROQ_API_KEY (never committed)
-└── frontend/            # Next.js + Tailwind app — the UI (the "wow")
+├── backend/                 # FastAPI API (Python)
+│   ├── api.py                  # endpoints, auth, rate limiting, export
+│   ├── rag_engine.py           # the RAG brain: retrieval, prompts, Gemini
+│   ├── requirements.txt        # dependency intent (loose pins)
+│   ├── requirements.lock.txt   # exact pins — install THIS for reproducible builds
+│   ├── Dockerfile              # deploy image (HF Spaces / Fly.io ready)
+│   ├── tests/                  # pytest suite (no LLM calls needed)
+│   ├── .env.example            # template — copy to .env and add your key
+│   └── .env                    # GOOGLE_API_KEY (never committed)
+└── frontend/                # Next.js + Tailwind app
+    ├── app/page.tsx            # the whole UI
+    └── lib/api.ts              # typed API client
 ```
 
 ## Tech stack
-- **Backend:** FastAPI · Uvicorn · LangChain · Groq (LLM) · ChromaDB (vector store) · HuggingFace embeddings
-- **Frontend:** Next.js (App Router) · React · TypeScript · Tailwind CSS
+- **Backend:** FastAPI · LangChain · Google Gemini (`gemini-3.6-flash`, free tier) ·
+  ChromaDB · HuggingFace MiniLM embeddings (local, free)
+- **Frontend:** Next.js (App Router) · React · TypeScript · Tailwind CSS · lucide-react
 
 ## Run locally
 **1. Backend**
 ```bash
 cd backend
-pip install -r requirements.txt
-# copy .env.example to .env and add your Groq key
+pip install -r requirements.lock.txt
+# copy .env.example to .env and add your GOOGLE_API_KEY
 uvicorn api:app --reload --port 8000
 ```
-Backend → http://localhost:8000  (interactive API docs at `/docs`)
+Backend → http://localhost:8000 (interactive API docs at `/docs`)
 
 **2. Frontend**
 ```bash
@@ -38,9 +59,49 @@ npm run dev
 ```
 Frontend → http://localhost:3000
 
-## Roadmap
-- [x] FastAPI backend wrapping the RAG engine
-- [ ] Next.js frontend — chat, upload, URL, quiz, flashcards, summary
-- [ ] Streaming answers (typewriter)
-- [ ] Any-file + any-web-link ingestion
-- [ ] Deploy: backend (Render/Railway) + frontend (Vercel)
+**3. Tests**
+```bash
+cd backend
+python -m pytest tests/ -v
+```
+
+## Configuration (backend `.env`)
+| Variable | Required | Purpose |
+|---|---|---|
+| `GOOGLE_API_KEY` | yes | Gemini API key (free at aistudio.google.com) |
+| `PERSIST_DIR` | no | Vector-store folder (default: `backend/chroma_db`; use `/data/chroma_db` on a host with a volume) |
+| `CORS_ORIGINS` | no | Comma-separated allowed frontend origins (default `http://localhost:3000`) |
+| `APP_ACCESS_TOKEN` | no | If set, every endpoint except `/health` requires `Authorization: Bearer <token>` — set it on any public deployment |
+
+Frontend env (Vercel → Project Settings): `NEXT_PUBLIC_API_URL` (backend URL),
+`NEXT_PUBLIC_API_TOKEN` (same value as `APP_ACCESS_TOKEN`).
+
+## Deploy (pilot-grade, ~$5/mo)
+1. **Backend → Hugging Face Spaces** (Docker Space, free 16GB RAM; +$5/mo
+   persistent storage mounted at `/data`). Push `backend/` with the Dockerfile;
+   set secrets `GOOGLE_API_KEY`, `APP_ACCESS_TOKEN`, `CORS_ORIGINS`,
+   `PERSIST_DIR=/data/chroma_db`, `HF_HOME=/data/hf_cache`.
+2. **Frontend → Vercel** (free). Import `frontend/`, set `NEXT_PUBLIC_API_URL`
+   to the Space URL and `NEXT_PUBLIC_API_TOKEN`.
+3. Ping `/health` with UptimeRobot (free) — doubles as keep-awake and outage alert.
+4. When cold starts hurt, move the same Docker image to Fly.io (2GB + volume ≈ $11/mo).
+
+**Run exactly ONE uvicorn worker** — Chroma's SQLite is single-writer and the
+engine is a single in-process object. Scale vertically.
+
+## Gemini free-tier limits (worth knowing)
+Uploading documents costs **zero** quota (embeddings are local). Only chat /
+quiz / notes / paper generation call Gemini: roughly 10-15 requests/min and a
+few hundred/day on the free tier. The app queues (max 2 concurrent), retries
+per-minute limits automatically during streaming, and fails fast with a
+friendly message otherwise. For a classroom, enable billing (~$0.002/request)
+or give each academy its own key.
+
+## Security posture
+- Optional bearer-token auth + per-IP rate limiting (30 req/min)
+- SSRF guard on link ingestion (private/internal addresses refused)
+- 20MB upload cap; prompt-injection fencing on all retrieved material
+- Raw errors stay in server logs; clients get generic messages
+- **Single-tenant by design** — one deployment = one user/team. Per-user
+  isolation (login + per-user collections) is the next milestone before any
+  shared public deployment.
