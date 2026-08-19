@@ -349,16 +349,18 @@ class RAGEngine:
     def usage_snapshot(self) -> Dict[str, Any]:
         return _QUOTA.snapshot()
 
-    def _invoke_llm(self, prompt_text: str, max_tokens: int = 8000):
+    def _invoke_llm(self, content, max_tokens: int = 8000):
         """Non-streaming Gemini call with automatic model fallback: walks the
         chain (each model = its own free quota), skipping models we know are
         limited. No sleeps — if the whole chain is limited, raise immediately
-        so api.py returns 429 instead of blocking a worker thread."""
+        so api.py returns 429 instead of blocking a worker thread.
+        `content` is a plain prompt string, or a multimodal parts list
+        (text + image) — HumanMessage accepts both."""
         last_err = None
         for model in _QUOTA.usable_models():
             _acquire_llm_slot()
             try:
-                resp = self._get_llm(model, max_tokens).invoke([HumanMessage(content=prompt_text)])
+                resp = self._get_llm(model, max_tokens).invoke([HumanMessage(content=content)])
                 _QUOTA.record_request(model)
                 return resp
             except Exception as e:
@@ -492,8 +494,67 @@ class RAGEngine:
             return [Document(page_content=text, metadata={"page": "Slides"})]
         raise Exception(f"Unsupported file type '{ext}'. Try PDF, Word, PowerPoint, TXT, MD, or CSV.")
 
+    # ---- Photo → text (Gemini vision as the OCR) ----------------------------
+    IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp")
+
+    TRANSCRIBE_PROMPT = (
+        "Transcribe ALL text visible in this image exactly — headings, paragraphs, "
+        "questions, marks, numbers, tables (as markdown). If it is handwritten, "
+        "transcribe the handwriting faithfully. Keep Urdu or any other language "
+        "as-is. For diagrams or figures, add a short description in [square "
+        "brackets]. Output ONLY the transcription, no commentary."
+    )
+
+    @staticmethod
+    def _prep_image(data: bytes) -> tuple:
+        """Downscale/re-encode a photo so a 6MB phone shot becomes a small JPEG
+        (faster upload to Gemini, well under its inline-size limit)."""
+        try:
+            import io
+            from PIL import Image
+            img = Image.open(io.BytesIO(data))
+            img.thumbnail((2048, 2048))
+            if img.mode not in ("RGB", "L"):
+                img = img.convert("RGB")
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=85)
+            return buf.getvalue(), "image/jpeg"
+        except Exception:
+            log.exception("Image re-encode failed — sending original bytes")
+            return data, "image/jpeg"
+
+    def image_to_text(self, data: bytes) -> str:
+        """Read a photo (notes page, textbook page, past paper) into text using
+        Gemini vision through the fallback chain. Costs one request."""
+        import base64
+        img_bytes, mime = self._prep_image(data)
+        b64 = base64.b64encode(img_bytes).decode("ascii")
+        content = [
+            {"type": "text", "text": self.TRANSCRIBE_PROMPT},
+            {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
+        ]
+        response = self._invoke_llm(content, max_tokens=8000)
+        usage = getattr(response, "usage_metadata", None) or {}
+        self._usage_payload(int(usage.get("input_tokens", 0) or 0),
+                            int(usage.get("output_tokens", 0) or 0))
+        text = self._content_text(getattr(response, "content", response)).strip()
+        if not text:
+            raise Exception("Couldn't read any text from that photo — try a clearer, closer shot.")
+        return text
+
     def process_file(self, uploaded_file) -> int:
         ext = "." + uploaded_file.name.split(".")[-1].lower()
+        # Photos: Gemini vision transcribes them, then they index like any doc.
+        if ext in self.IMAGE_EXTS:
+            text = self.image_to_text(uploaded_file.read())
+            docs = [Document(page_content=text, metadata={"page": "Photo"})]
+            for d in docs:
+                d.metadata["source"] = uploaded_file.name
+            chunks = self.splitter.split_documents(docs)
+            if not chunks:
+                raise Exception("No readable text found in that photo.")
+            self.delete_document(uploaded_file.name)
+            return self._index(chunks)
         with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
             tmp.write(uploaded_file.read())
             tmp_path = tmp.name
@@ -771,7 +832,8 @@ class RAGEngine:
             "- Ground every claim in the excerpts below. If the answer isn't there, say so plainly "
             "(\"I couldn't find that in your material\") instead of inventing facts.\n"
             "- Each excerpt is tagged [From: <document>]. Excerpts may come from different documents — "
-            "use only the ones relevant to the question and ignore the rest.\n"
+            "use only the ones relevant to the question and ignore the rest. Never repeat the "
+            "[From: ...] tags in your answer; sources are shown to the student separately.\n"
             f"- Length: {length_guidance}\n"
             "- Explain clearly for a beginner, in plain language.\n"
             "- Use the conversation so far to resolve follow-ups like \"explain that more\".\n"

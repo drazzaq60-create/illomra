@@ -644,8 +644,8 @@ export default function Home() {
           {showAdd && (
             <div className="space-y-2 pt-1 border-t border-slate-800/60">
               <label className={`block rounded-lg border border-dashed p-2 text-center cursor-pointer text-xs transition ${busy ? "opacity-50 pointer-events-none" : "border-slate-700 hover:border-emerald-500/50"}`}>
-                <input type="file" multiple accept=".pdf,.txt,.md,.csv,.docx,.pptx" onChange={handleUpload} className="hidden" disabled={!!busy} />
-                <span className="inline-flex items-center gap-1.5 justify-center"><UploadCloud size={13} /> Upload files <span className="text-slate-500">(PDF/Word/PPT)</span></span>
+                <input type="file" multiple accept=".pdf,.txt,.md,.csv,.docx,.pptx,.png,.jpg,.jpeg,.webp" onChange={handleUpload} className="hidden" disabled={!!busy} />
+                <span className="inline-flex items-center gap-1.5 justify-center"><UploadCloud size={13} /> Upload files <span className="text-slate-500">(PDF/Word/PPT/photo)</span></span>
               </label>
               <div className="flex gap-1">
                 <input value={url} onChange={(e) => setUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") handleUrl(); }} placeholder="Paste any link or YouTube URL" disabled={!!busy} className="flex-1 rounded-lg bg-slate-800/60 border border-slate-700 outline-none px-2 py-1.5 text-xs placeholder:text-slate-600" />
@@ -725,7 +725,7 @@ export default function Home() {
                   <div className="h-14 w-14 rounded-2xl bg-emerald-500/10 text-emerald-400 grid place-items-center"><FileText size={26} /></div>
                   <div className="text-lg text-slate-200 font-medium">Generate an exam paper from your material</div>
                   <ol className="text-sm text-slate-400 text-left space-y-1.5 max-w-sm list-decimal pl-5">
-                    <li>Attach a sample/past paper with <Paperclip size={12} className="inline" /> so it copies YOUR institute&apos;s format</li>
+                    <li>Attach a sample/past paper (file or photo) with <Paperclip size={12} className="inline" /> so it copies YOUR institute&apos;s format</li>
                     <li>Set answer key, difficulty and marks below</li>
                     <li>Describe the paper — e.g. <span className="text-slate-300">&quot;50-mark paper from chapter 3, Q1 scenario-based&quot;</span></li>
                   </ol>
@@ -752,10 +752,10 @@ export default function Home() {
                     onDrop={handleDrop}
                     className={`w-full max-w-lg cursor-pointer rounded-2xl border-2 border-dashed p-8 text-center transition ${dragOver ? "border-emerald-400 bg-emerald-500/10" : "border-slate-700 hover:border-emerald-500/50 bg-slate-800/20"}`}
                   >
-                    <input type="file" multiple accept=".pdf,.txt,.md,.csv,.docx,.pptx" onChange={handleUpload} className="hidden" disabled={!!busy} />
+                    <input type="file" multiple accept=".pdf,.txt,.md,.csv,.docx,.pptx,.png,.jpg,.jpeg,.webp" onChange={handleUpload} className="hidden" disabled={!!busy} />
                     <UploadCloud size={34} className="mx-auto text-emerald-400 mb-3" />
                     <div className="text-slate-100 font-medium text-lg">Drop in your study material</div>
-                    <div className="text-sm text-slate-500 mt-1">Textbooks, notes, slides, past papers — PDF, Word, PPT, or paste a link in the sidebar</div>
+                    <div className="text-sm text-slate-500 mt-1">Textbooks, notes, slides, past papers — PDF, Word, PPT, even a <span className="text-slate-300">photo of handwritten notes</span> — or paste a link in the sidebar</div>
                     {busy && <div className="text-xs text-emerald-400 animate-pulse mt-3">{busy}</div>}
                   </label>
 
@@ -929,7 +929,7 @@ export default function Home() {
           <div className="max-w-3xl mx-auto flex items-end gap-2">
             {isPaper && (
               <label title="Attach a format / past-paper sample" className={`h-11 w-11 shrink-0 grid place-items-center rounded-xl border cursor-pointer transition ${patternName ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-300" : "bg-slate-800/60 border-slate-700 text-slate-300 hover:border-emerald-500/50"}`}>
-                <input type="file" accept=".pdf,.txt,.md,.csv,.docx,.pptx" onChange={handlePatternUpload} className="hidden" />
+                <input type="file" accept=".pdf,.txt,.md,.csv,.docx,.pptx,.png,.jpg,.jpeg,.webp" onChange={handlePatternUpload} className="hidden" />
                 <Paperclip size={17} />
               </label>
             )}

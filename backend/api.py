@@ -332,10 +332,13 @@ async def upload(file: UploadFile = File(...)):
         chunks = get_engine().process_file(_UploadShim(file.filename, data))
     except HTTPException:
         raise
-    except Exception:
+    except Exception as e:
+        # Photo transcription goes through Gemini — surface limit/busy errors honestly.
+        if _is_rate_limit_err(e) or _is_busy_err(e):
+            raise _ai_http_error(e)
         log.exception("Upload failed for %r", file.filename)
         raise HTTPException(status_code=400,
-                            detail="Couldn't read that file — supported: PDF, Word, PPT, TXT, MD, CSV.")
+                            detail="Couldn't read that file — supported: PDF, Word, PPT, TXT, MD, CSV, or a photo (JPG/PNG).")
     return {"filename": file.filename, "chunks": chunks, "stats": get_engine().get_stats()}
 
 
@@ -420,12 +423,19 @@ def delete_document(body: DeleteDocIn):
 
 @router.post("/extract")
 async def extract(file: UploadFile = File(...)):
-    """Extract plain text from an uploaded sample/pattern paper (not indexed as content)."""
+    """Extract plain text from an uploaded sample/pattern paper (not indexed as content).
+    Photos are transcribed by Gemini vision (costs one request)."""
     import tempfile
     data = await file.read()
     if len(data) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail=UPLOAD_TOO_BIG)
     ext = "." + (file.filename or "x.txt").split(".")[-1].lower()
+    if ext in RAGEngine.IMAGE_EXTS:
+        try:
+            text = get_engine().image_to_text(data)
+        except Exception as e:
+            raise _ai_http_error(e)
+        return {"text": text[:15000]}
     with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
         tmp.write(data)
         path = tmp.name
@@ -435,7 +445,7 @@ async def extract(file: UploadFile = File(...)):
     except Exception:
         log.exception("Extract failed for %r", file.filename)
         raise HTTPException(status_code=400,
-                            detail="Couldn't read that file — supported: PDF, Word, PPT, TXT, MD, CSV.")
+                            detail="Couldn't read that file — supported: PDF, Word, PPT, TXT, MD, CSV, or a photo.")
     finally:
         os.unlink(path)
     return {"text": text[:15000]}
