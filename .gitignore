@@ -1,0 +1,19 @@
+# ---- Python (backend) ----
+__pycache__/
+*.pyc
+.env
+.venv/
+venv/
+backend/chroma_db/
+chroma_db/
+
+# ---- Node / Next.js (frontend) ----
+node_modules/
+.next/
+out/
+*.log
+.DS_Store
+
+# ---- Local env files ----
+.env.local
+.env*.local
