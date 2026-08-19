@@ -8,7 +8,7 @@ import {
   Paperclip, Mic, ArrowUp, Square, Menu, Globe, Download, ListChecks, ScrollText,
   UploadCloud, X, RotateCcw, FileDown,
 } from "lucide-react";
-import { api, type QuizQuestion, type Source, type Usage, type Stats, type Doc } from "@/lib/api";
+import { api, type QuizQuestion, type Source, type Usage, type Stats, type Doc, type QuotaSnapshot } from "@/lib/api";
 
 type Msg = {
   role: "user" | "assistant";
@@ -21,6 +21,7 @@ type Msg = {
   confidence?: number;
   latency?: number;
   web?: boolean;
+  model?: string; // which AI model answered (empty/primary = normal)
 };
 
 type Convo = {
@@ -44,6 +45,12 @@ function fmtNum(n: number): string {
 
 function shortName(s: string, max = 26): string {
   return s.length > max ? s.slice(0, max - 1) + "…" : s;
+}
+
+function fmtEta(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.round((seconds % 3600) / 60);
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 
 function makeConvo(kind: "chat" | "paper" = "chat"): Convo {
@@ -120,6 +127,7 @@ export default function Home() {
   const [hydrated, setHydrated] = useState(false);
 
   const [connected, setConnected] = useState<boolean | null>(null);
+  const [quota, setQuota] = useState<QuotaSnapshot | null>(null);
   const [docs, setDocs] = useState<Doc[]>([]);
   const [scopeSource, setScopeSource] = useState(""); // "" = all materials
   const [stats, setStats] = useState<Stats>({ documents: 0, chunks: 0 });
@@ -201,11 +209,20 @@ export default function Home() {
     }
   }
 
+  async function refreshQuota() {
+    try {
+      setQuota(await api.quota());
+    } catch {
+      // backend not up yet — ignore
+    }
+  }
+
   // Mount-only backend handshake (async — state lands after the fetch resolves).
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     api.health().then(() => setConnected(true)).catch(() => setConnected(false));
     refreshDocs();
+    refreshQuota();
   }, []);
   /* eslint-enable react-hooks/set-state-in-effect */
 
@@ -413,17 +430,18 @@ export default function Home() {
               return;
             }
             setUsage(meta.usage ?? null);
+            refreshQuota();
             // Empty/blank answer: still show a real bubble instead of a dead turn.
             if (!started) {
               started = true;
               setThinking(false);
-              setMessages((m) => [...m, { role: "assistant", content: "I couldn't find an answer in your material for that. Try rephrasing, or change \"Answering from\" below.", type: msgType, sources: meta.sources, confidence: meta.confidence, latency: meta.latency_ms, web: meta.web_used }]);
+              setMessages((m) => [...m, { role: "assistant", content: "I couldn't find an answer in your material for that. Try rephrasing, or change \"Answering from\" below.", type: msgType, sources: meta.sources, confidence: meta.confidence, latency: meta.latency_ms, web: meta.web_used, model: meta.model }]);
               return;
             }
             setMessages((m) => {
               const copy = [...m];
               const last = copy[copy.length - 1];
-              if (last && last.role === "assistant") copy[copy.length - 1] = { ...last, sources: meta.sources, confidence: meta.confidence, latency: meta.latency_ms, web: meta.web_used };
+              if (last && last.role === "assistant") copy[copy.length - 1] = { ...last, sources: meta.sources, confidence: meta.confidence, latency: meta.latency_ms, web: meta.web_used, model: meta.model };
               return copy;
             });
           },
@@ -459,6 +477,7 @@ export default function Home() {
       flashError(err instanceof Error ? err.message : "Couldn't build study notes");
     } finally {
       setSummaryLoading(false);
+      refreshQuota();
     }
   }
 
@@ -473,6 +492,7 @@ export default function Home() {
       flashError(err instanceof Error ? err.message : "Couldn't build the quiz");
     } finally {
       setQuizLoading(false);
+      refreshQuota();
     }
   }
 
@@ -636,7 +656,31 @@ export default function Home() {
           )}
         </div>
 
-        {/* Footer: export + usage (tucked away — not developer telemetry in the user's face) */}
+        {/* Daily AI limit — how much free capacity is left across the model chain */}
+        {quota && quota.totals.capacity > 0 && (() => {
+          const used = quota.totals.used_today;
+          const cap = quota.totals.capacity;
+          const pct = Math.min(100, Math.round((used / cap) * 100));
+          const barColor = pct >= 90 ? "bg-red-400" : pct >= 65 ? "bg-amber-400" : "bg-emerald-400";
+          const exhausted = quota.models.filter((m) => m.status === "exhausted").length;
+          return (
+            <div className="border-t border-slate-800 px-3 py-2.5">
+              <div className="flex justify-between text-[11px] text-slate-400 mb-1">
+                <span>AI limit today</span>
+                <span>≈ {used} / {cap}</span>
+              </div>
+              <div className="h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${Math.max(1, pct)}%` }} />
+              </div>
+              <div className="mt-1 flex justify-between text-[10px] text-slate-600">
+                <span>{exhausted > 0 ? `${exhausted} of ${quota.models.length} models at limit` : `${quota.models.length} models available`}</span>
+                <span>resets in {fmtEta(quota.totals.resets_in_s)}</span>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* Footer: export + session tokens (tucked away — not in the user's face) */}
         <div className="border-t border-slate-800 px-3 py-2 flex items-center justify-between text-[11px] text-slate-600">
           <button onClick={exportChats} className="inline-flex items-center gap-1 hover:text-slate-300" title="Download all chats as JSON"><FileDown size={11} /> Export chats</button>
           {usage && (
@@ -767,6 +811,10 @@ export default function Home() {
                       )}
 
                       {m.web && <div className="mt-2 text-[11px] text-sky-400 inline-flex items-center gap-1"><Globe size={11} /> Searched the web</div>}
+
+                      {m.model && quota && m.model !== quota.primary && (
+                        <div className="mt-2 text-[11px] text-amber-400/80" title="The primary model was at its free limit, so a backup Gemini model answered — same material, same context.">⚡ Answered by backup model ({m.model})</div>
+                      )}
 
                       {m.sources && m.sources.length > 0 && (
                         <details className="mt-2">

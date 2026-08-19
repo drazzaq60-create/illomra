@@ -63,6 +63,165 @@ AVAILABLE_MODELS = {
     "gemini-3.6-flash": "⚡ Gemini 3.6 Flash (1M context)",
 }
 
+# --- Model fallback chain -----------------------------------------------------
+# Google's free-tier quotas are PER MODEL, so each model in this chain is an
+# independent pool of requests on the SAME key. When one model hits its limit
+# we hop to the next — same family, same 1M context, near-identical quality —
+# instead of making the student wait. Order = preference.
+MODEL_CHAIN = [m.strip() for m in os.getenv(
+    "GEMINI_MODEL_CHAIN",
+    "gemini-3.6-flash,gemini-3.7-flash,gemini-3.5-flash,gemini-3.5-flash-lite,gemini-2.5-flash",
+).split(",") if m.strip()]
+
+# Free-tier limit ESTIMATES for the usage bar (Google exposes no remaining-quota
+# API, so we count our own requests against these; lite models get bigger caps).
+def _daily_limit_estimate(model: str) -> int:
+    return 1000 if "lite" in model else 250
+
+MINUTE_COOLDOWN_S = 65          # back off this long on a per-minute 429
+# Free quotas reset at midnight US-Pacific ≈ 07:00 UTC (PDT). Good enough for a bar.
+RESET_HOUR_UTC = int(os.getenv("QUOTA_RESET_HOUR_UTC", "7"))
+
+USAGE_STATE_PATH = os.getenv(
+    "USAGE_STATE_PATH",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "usage_state.json"),
+)
+
+
+class ModelQuota:
+    """Tracks our own request counts + limit hits per model (persisted to disk
+    so uvicorn --reload restarts don't zero the usage bar)."""
+
+    def __init__(self, chain: List[str], path: str = USAGE_STATE_PATH):
+        self.chain = chain
+        self.path = path
+        self._lock = threading.Lock()
+        self.state: Dict[str, Dict[str, Any]] = {}
+        self._load()
+
+    # -- day bookkeeping (a "day" = the free tier's reset window) --
+    @staticmethod
+    def _day_key(now: Optional[float] = None) -> str:
+        import datetime as _dt
+        t = _dt.datetime.fromtimestamp(now or time.time(), _dt.timezone.utc)
+        return (t - _dt.timedelta(hours=RESET_HOUR_UTC)).strftime("%Y-%m-%d")
+
+    @staticmethod
+    def next_reset_ts(now: Optional[float] = None) -> float:
+        import datetime as _dt
+        t = _dt.datetime.fromtimestamp(now or time.time(), _dt.timezone.utc)
+        reset = t.replace(hour=RESET_HOUR_UTC, minute=0, second=0, microsecond=0)
+        if reset <= t:
+            reset += _dt.timedelta(days=1)
+        return reset.timestamp()
+
+    def _slot(self, model: str) -> Dict[str, Any]:
+        day = self._day_key()
+        s = self.state.setdefault(model, {})
+        if s.get("day") != day:  # new quota day — counters reset
+            s.update({"day": day, "used": 0, "exhausted_until": 0.0})
+        s.setdefault("cooldown_until", 0.0)
+        s.setdefault("exhausted_until", 0.0)
+        s.setdefault("used", 0)
+        return s
+
+    # -- persistence --
+    def _load(self):
+        try:
+            import json as _json
+            with open(self.path, "r", encoding="utf-8") as f:
+                self.state = _json.load(f)
+        except Exception:
+            self.state = {}
+
+    def _save(self):
+        try:
+            import json as _json
+            with open(self.path, "w", encoding="utf-8") as f:
+                _json.dump(self.state, f)
+        except Exception:
+            log.exception("Could not persist usage state")
+
+    # -- the API the engine uses --
+    def usable_models(self) -> List[str]:
+        now = time.time()
+        out = []
+        with self._lock:
+            for m in self.chain:
+                s = self._slot(m)
+                if s["exhausted_until"] > now or s["cooldown_until"] > now:
+                    continue
+                out.append(m)
+        return out
+
+    def record_request(self, model: str):
+        with self._lock:
+            self._slot(model)["used"] += 1
+            self._save()
+
+    def mark_limited(self, model: str, err_str: str):
+        """Classify a 429: daily quota → out until the reset; else 65s cooldown."""
+        now = time.time()
+        daily = "day" in err_str.lower()  # Google's metric ids say e.g. ...PerDay / per day
+        with self._lock:
+            s = self._slot(model)
+            if daily:
+                s["exhausted_until"] = self.next_reset_ts(now)
+                # We hit the wall — pin our estimate to what we actually counted.
+                s["used"] = max(s["used"], _daily_limit_estimate(model))
+            else:
+                s["cooldown_until"] = now + MINUTE_COOLDOWN_S
+            self._save()
+
+    def soonest_retry_s(self) -> Optional[float]:
+        """Seconds until SOME model becomes usable again from a per-minute
+        cooldown — None if everything is done for the day."""
+        now = time.time()
+        waits = []
+        with self._lock:
+            for m in self.chain:
+                s = self._slot(m)
+                if s["exhausted_until"] > now:
+                    continue  # gone until reset — not a short wait
+                waits.append(max(0.0, s["cooldown_until"] - now))
+        return min(waits) if waits else None
+
+    def snapshot(self) -> Dict[str, Any]:
+        now = time.time()
+        models, total_used, capacity = [], 0, 0
+        with self._lock:
+            for m in self.chain:
+                s = self._slot(m)
+                limit = _daily_limit_estimate(m)
+                if s["exhausted_until"] > now:
+                    status = "exhausted"
+                elif s["cooldown_until"] > now:
+                    status = "cooldown"
+                else:
+                    status = "ok"
+                used = min(s["used"], limit)
+                total_used += used
+                capacity += limit
+                models.append({
+                    "model": m,
+                    "used_today": used,
+                    "daily_limit": limit,
+                    "status": status,
+                    "retry_in_s": int(max(0, max(s["cooldown_until"], 0) - now)) if status == "cooldown" else 0,
+                })
+        return {
+            "primary": self.chain[0] if self.chain else "",
+            "models": models,
+            "totals": {
+                "used_today": total_used,
+                "capacity": capacity,
+                "resets_in_s": int(self.next_reset_ts(now) - now),
+            },
+        }
+
+
+_QUOTA = ModelQuota(MODEL_CHAIN)
+
 # --- Concurrency guard for the LLM -------------------------------------------
 # Gemini free tier tolerates very little parallelism; cap in-flight calls at 2.
 # The "busy:" prefix is recognized by api.py and mapped to HTTP 503.
@@ -154,17 +313,22 @@ class RAGEngine:
             self._reload_store()
 
     # ---- LLM ----------------------------------------------------------------
-    def _get_llm(self, max_tokens: int = 8000):
-        # Cache one client per output-size so we don't rebuild it on every call.
-        llm = self._llm_cache.get(max_tokens)
+    def _get_llm(self, model: str, max_tokens: int = 8000):
+        # Cache one client per (model, output-size) so we don't rebuild per call.
+        key = (model, max_tokens)
+        llm = self._llm_cache.get(key)
         if llm is None:
             llm = ChatGoogleGenerativeAI(
-                model=self.model_name,
+                model=model,
                 google_api_key=self.api_key or os.getenv("GOOGLE_API_KEY", ""),
                 temperature=0.2,
                 max_output_tokens=max_tokens,
+                # No client-side retries: a 429 must surface IMMEDIATELY so our
+                # fallback chain hops to the next model in ~1s instead of the
+                # library silently retrying a dead model for close to a minute.
+                max_retries=1,
             )
-            self._llm_cache[max_tokens] = llm
+            self._llm_cache[key] = llm
         return llm
 
     @staticmethod
@@ -172,19 +336,41 @@ class RAGEngine:
         s = str(e).lower()
         return "429" in s or "resource_exhausted" in s or "quota" in s or "rate limit" in s
 
-    # Free-tier per-minute limit backoff — used ONLY by query_stream, which can
-    # tell the UI it's waiting. Non-streaming paths fail fast with HTTP 429 instead
-    # of blocking a worker thread for up to a minute.
-    RETRY_WAITS = (20, 40)
+    @classmethod
+    def _is_hoppable(cls, e) -> bool:
+        """Errors where trying the NEXT model in the chain makes sense: rate
+        limits AND Google-side overload (503 'high demand' / 'overloaded')."""
+        s = str(e).lower()
+        return cls._is_rate_limit(e) or "503" in s or "unavailable" in s or "high demand" in s or "overloaded" in s
+
+    ALL_LIMITED_MSG = ("rate limit: every backup model is at its free-tier limit right now — "
+                       "try again shortly.")
+
+    def usage_snapshot(self) -> Dict[str, Any]:
+        return _QUOTA.snapshot()
 
     def _invoke_llm(self, prompt_text: str, max_tokens: int = 8000):
-        """Single non-streaming Gemini call. No retries — rate limits surface
-        immediately so api.py can return 429 instead of blocking the worker."""
-        _acquire_llm_slot()
-        try:
-            return self._get_llm(max_tokens).invoke([HumanMessage(content=prompt_text)])
-        finally:
-            _LLM_SEMAPHORE.release()
+        """Non-streaming Gemini call with automatic model fallback: walks the
+        chain (each model = its own free quota), skipping models we know are
+        limited. No sleeps — if the whole chain is limited, raise immediately
+        so api.py returns 429 instead of blocking a worker thread."""
+        last_err = None
+        for model in _QUOTA.usable_models():
+            _acquire_llm_slot()
+            try:
+                resp = self._get_llm(model, max_tokens).invoke([HumanMessage(content=prompt_text)])
+                _QUOTA.record_request(model)
+                return resp
+            except Exception as e:
+                if self._is_hoppable(e):
+                    log.info("model %s unavailable (%.60s) — trying next in chain", model, str(e))
+                    _QUOTA.mark_limited(model, str(e))
+                    last_err = e
+                    continue
+                raise
+            finally:
+                _LLM_SEMAPHORE.release()
+        raise last_err or Exception(self.ALL_LIMITED_MSG)
 
     @staticmethod
     def _content_text(content) -> str:
@@ -644,46 +830,64 @@ class RAGEngine:
     def query_stream(self, question: str, history=None, pattern: str = "",
                      source: str = "", paper_opts: str = ""):
         """The chat path (streaming NDJSON frames). Works with no documents too
-        (general-assistant mode). Retries the free-tier per-minute limit here —
-        and ONLY here — because this path can tell the UI it's waiting."""
+        (general-assistant mode). On a rate limit it hops to the next model in
+        the chain INSTANTLY (each model = its own free quota); only when every
+        model is briefly limited does it wait — telling the UI why."""
         start = time.time()
         prompt_text, sources, confidence, web_used, max_tokens = self._prepare(
             question, history, source, pattern, paper_opts
         )
 
         in_tok, out_tok = 0, 0
-        attempts = (0,) + self.RETRY_WAITS
         streamed = False
-        for i, wait in enumerate(attempts):
-            if wait:
-                # Tell the UI we're pausing for the free-tier limit (so it doesn't look frozen).
-                yield {"notice": f"⏳ Free-tier limit reached — waiting {wait}s and retrying…"}
-                time.sleep(wait)
-            _acquire_llm_slot()
-            try:
-                for chunk in self._get_llm(max_tokens).stream([HumanMessage(content=prompt_text)]):
-                    txt = self._content_text(getattr(chunk, "content", ""))
-                    if txt:
-                        streamed = True
-                        yield {"token": txt}
-                    um = getattr(chunk, "usage_metadata", None)
-                    if um:
-                        in_tok = int(um.get("input_tokens", 0) or in_tok)
-                        out_tok = int(um.get("output_tokens", 0) or out_tok)
-                break  # streamed to completion
-            except Exception as e:
-                # Retry only if we've emitted nothing yet — can't un-send tokens mid-stream.
-                if self._is_rate_limit(e) and not streamed and i < len(attempts) - 1:
-                    continue
-                raise
-            finally:
-                _LLM_SEMAPHORE.release()
+        answered = False
+        used_model = ""
+        last_err = None
+        for round_ in range(2):  # second round only after a short all-limited wait
+            for model in _QUOTA.usable_models():
+                if model != MODEL_CHAIN[0]:
+                    yield {"notice": f"⚡ Primary model at its limit — using backup ({model})"}
+                _acquire_llm_slot()
+                try:
+                    for chunk in self._get_llm(model, max_tokens).stream([HumanMessage(content=prompt_text)]):
+                        txt = self._content_text(getattr(chunk, "content", ""))
+                        if txt:
+                            streamed = True
+                            yield {"token": txt}
+                        um = getattr(chunk, "usage_metadata", None)
+                        if um:
+                            in_tok = int(um.get("input_tokens", 0) or in_tok)
+                            out_tok = int(um.get("output_tokens", 0) or out_tok)
+                    answered = True
+                    used_model = model
+                    _QUOTA.record_request(model)
+                    break
+                except Exception as e:
+                    # Hop to the next model only if nothing streamed yet —
+                    # we can't un-send half an answer.
+                    if self._is_hoppable(e) and not streamed:
+                        log.info("model %s unavailable mid-chat (%.60s) — trying next", model, str(e))
+                        _QUOTA.mark_limited(model, str(e))
+                        last_err = e
+                        continue
+                    raise
+                finally:
+                    _LLM_SEMAPHORE.release()
+            if answered:
+                break
+            wait = _QUOTA.soonest_retry_s()
+            if round_ == 0 and wait is not None and wait <= 70:
+                yield {"notice": f"⏳ All models briefly limited — retrying in {max(1, int(wait))}s…"}
+                time.sleep(max(1.0, wait))
+                continue
+            raise last_err or Exception(self.ALL_LIMITED_MSG)
         usage_payload = self._usage_payload(in_tok, out_tok)
         yield {
             "done": True,
             "sources": sources,
             "confidence": confidence,
             "web_used": web_used,
+            "model": used_model,
             "latency_ms": int((time.time() - start) * 1000),
             "usage": usage_payload,
             "cost": "free",

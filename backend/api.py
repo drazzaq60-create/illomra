@@ -460,6 +460,13 @@ def stats():
     return get_engine().get_stats()
 
 
+@router.get("/usage")
+def usage():
+    """Per-model free-tier usage for the UI's limit bar (our own counts —
+    Google exposes no remaining-quota API, so daily_limit values are estimates)."""
+    return get_engine().usage_snapshot()
+
+
 @router.post("/reset")
 def reset():
     get_engine().reset()

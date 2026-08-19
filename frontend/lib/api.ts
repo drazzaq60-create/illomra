@@ -38,6 +38,21 @@ export type StreamMeta = {
   usage?: Usage;
   cost?: string;
   error?: string;
+  model?: string; // which model answered (fallback chain)
+};
+
+export type QuotaModel = {
+  model: string;
+  used_today: number;
+  daily_limit: number;
+  status: "ok" | "cooldown" | "exhausted";
+  retry_in_s: number;
+};
+
+export type QuotaSnapshot = {
+  primary: string;
+  models: QuotaModel[];
+  totals: { used_today: number; capacity: number; resets_in_s: number };
 };
 
 async function req(path: string, options?: RequestInit) {
@@ -143,6 +158,8 @@ export const api = {
     }),
 
   stats: (): Promise<Stats> => req("/stats"),
+
+  quota: (): Promise<QuotaSnapshot> => req("/usage"),
 
   documents: (): Promise<{ documents: Doc[] }> => req("/documents"),
 

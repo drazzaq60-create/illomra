@@ -17,3 +17,4 @@ out/
 # ---- Local env files ----
 .env.local
 .env*.local
+usage_state.json
