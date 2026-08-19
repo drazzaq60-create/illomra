@@ -61,6 +61,14 @@ os.makedirs(PATTERN_DIR, exist_ok=True)
 # "Authorization: Bearer <token>". Unset = local dev, no auth.
 APP_ACCESS_TOKEN = os.getenv("APP_ACCESS_TOKEN", "").strip()
 
+# Server-side conversation store — deployed users must not depend on one
+# browser's localStorage. Point at the persistent volume in production.
+CONVO_STORE = os.getenv(
+    "CONVO_STORE",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "convo_store.json"),
+)
+_convo_lock = threading.Lock()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -203,6 +211,11 @@ class QuizIn(BaseModel):
     source: str = ""
     topic: str = ""  # optional focus topic — used as the retrieval query when given
     avoid: list = []  # stems of recently asked questions, to prevent repeats
+
+
+class ConvosIn(BaseModel):
+    convos: list = []
+    current: str = ""
 
 
 class SummaryIn(BaseModel):
@@ -567,6 +580,32 @@ def export(body: ExportIn):
 @router.get("/stats")
 def stats():
     return get_engine().get_stats()
+
+
+@router.get("/convos")
+def get_convos():
+    """The saved conversation list — so chats follow the workspace, not one browser."""
+    try:
+        with open(CONVO_STORE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return {"convos": data.get("convos", []), "current": data.get("current", "")}
+    except Exception:
+        return {"convos": [], "current": ""}
+
+
+@router.put("/convos")
+def put_convos(body: ConvosIn):
+    data = {"convos": body.convos[:300], "current": body.current}
+    raw = json.dumps(data, ensure_ascii=False)
+    if len(raw) > 8_000_000:
+        raise HTTPException(status_code=413,
+                            detail="Chat history is too large to save — delete some old chats.")
+    with _convo_lock:
+        tmp = CONVO_STORE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(raw)
+        os.replace(tmp, CONVO_STORE)
+    return {"status": "saved"}
 
 
 @router.get("/usage")

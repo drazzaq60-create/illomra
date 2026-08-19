@@ -19,3 +19,4 @@ out/
 .env*.local
 usage_state.json
 backend/pattern_files/
+backend/convo_store.json

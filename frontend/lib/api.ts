@@ -190,6 +190,16 @@ export const api = {
 
   quota: (): Promise<QuotaSnapshot> => req("/usage"),
 
+  // Server-side conversation store (chats follow the workspace, not one browser).
+  getConvos: (): Promise<{ convos: unknown[]; current: string }> => req("/convos"),
+
+  putConvos: (convos: unknown[], current: string): Promise<{ status: string }> =>
+    req("/convos", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ convos, current }),
+    }),
+
   documents: (): Promise<{ documents: Doc[] }> => req("/documents"),
 
   deleteDocument: (source: string): Promise<{ status: string; stats: Stats }> =>

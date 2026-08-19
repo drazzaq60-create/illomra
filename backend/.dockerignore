@@ -6,3 +6,4 @@ __pycache__/
 tests/
 usage_state.json
 pattern_files/
+convo_store.json

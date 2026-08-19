@@ -222,25 +222,41 @@ export default function Home() {
      purpose — renaming them would silently wipe existing users' chats. ── */
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    let loaded: Convo[] = [];
-    try {
-      loaded = JSON.parse(localStorage.getItem("studymind_convos") || "[]");
-    } catch {
-      loaded = [];
-    }
-    const savedId = localStorage.getItem("studymind_current") || "";
-    if (!Array.isArray(loaded) || loaded.length === 0) {
-      const c = makeConvo();
-      loaded = [c];
-      setCurrentId(c.id);
-    } else {
-      const cur = loaded.some((c) => c.id === savedId) ? savedId : loaded[0].id;
-      setCurrentId(cur);
-      const curConvo = loaded.find((c) => c.id === cur);
-      if (curConvo?.kind === "paper") setNav("papers");
-    }
-    setConvos(loaded);
-    setHydrated(true);
+    (async () => {
+      // Server store wins (chats follow the workspace, not one browser);
+      // localStorage is the offline/legacy fallback.
+      let loaded: Convo[] = [];
+      let savedId = "";
+      try {
+        const remote = await api.getConvos();
+        if (Array.isArray(remote.convos) && remote.convos.length > 0) {
+          loaded = remote.convos as Convo[];
+          savedId = remote.current || "";
+        }
+      } catch {
+        // backend down or locked — fall back to local
+      }
+      if (loaded.length === 0) {
+        try {
+          loaded = JSON.parse(localStorage.getItem("studymind_convos") || "[]");
+        } catch {
+          loaded = [];
+        }
+        savedId = localStorage.getItem("studymind_current") || "";
+      }
+      if (!Array.isArray(loaded) || loaded.length === 0) {
+        const c = makeConvo();
+        loaded = [c];
+        setCurrentId(c.id);
+      } else {
+        const cur = loaded.some((c) => c.id === savedId) ? savedId : loaded[0].id;
+        setCurrentId(cur);
+        const curConvo = loaded.find((c) => c.id === cur);
+        if (curConvo?.kind === "paper") setNav("papers");
+      }
+      setConvos(loaded);
+      setHydrated(true);
+    })();
   }, []);
   /* eslint-enable react-hooks/set-state-in-effect */
 
@@ -254,7 +270,9 @@ export default function Home() {
       } catch {
         flashError("Browser storage is full — delete some old chats, or use Export chats.");
       }
-    }, 400);
+      // Mirror to the server store so chats survive any browser/device.
+      api.putConvos(convos, currentId).catch(() => {});
+    }, 700);
     return () => {
       if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
     };
@@ -813,7 +831,7 @@ export default function Home() {
 
       {/* ── Labeled rail (frosted glass) ── */}
       <nav className="w-[76px] shrink-0 flex flex-col items-center border-r border-white/60 bg-white/55 backdrop-blur-xl py-3 gap-1.5 z-40">
-        <div className="mb-2"><Logo size={36} /></div>
+        <button onClick={newChat} title="Illomra — home" aria-label="Home" className="mb-2 transition hover:scale-105 active:scale-95"><Logo size={36} /></button>
         {railBtn("learn", <GraduationCap size={19} />, "Learn", "Learn — your materials and chats about them")}
         {railBtn("papers", <FileText size={19} />, "Papers", "Paper Studio — generate exam papers")}
         <div className="flex-1" />
