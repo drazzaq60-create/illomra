@@ -710,7 +710,7 @@ export default function Home() {
   const paperConvos = convos.filter((c) => c.kind === "paper").sort(byPin);
 
   const convoRow = (c: Convo) => (
-    <div key={c.id} className={`group flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm cursor-pointer transition ${c.id === currentId ? "bg-indigo-50 text-indigo-900" : "text-gray-600 hover:bg-gray-100"}`} onClick={() => openConvo(c)}>
+    <div key={c.id} className={`group flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm cursor-pointer transition ${c.id === currentId ? "bg-white/90 text-indigo-900 shadow-sm ring-1 ring-indigo-200/70" : "text-gray-600 hover:bg-white/60 hover:translate-x-0.5"}`} onClick={() => openConvo(c)}>
       <span className={`shrink-0 ${c.id === currentId ? "text-indigo-500" : "text-gray-400"}`}>{c.kind === "paper" ? <FileText size={13} /> : <MessageSquare size={13} />}</span>
       {renamingId === c.id ? (
         <input
@@ -762,7 +762,9 @@ export default function Home() {
         </div>
       </div>
       <div className="flex-1 overflow-y-auto p-5">
-        <div className="mx-auto max-w-[720px] bg-white rounded-sm shadow-[0_2px_16px_rgba(0,0,0,0.12)] border border-gray-200 px-10 py-9 min-h-[900px]">
+        <div className="relative mx-auto max-w-[720px] bg-[#fffdf7] rounded-sm shadow-[0_6px_28px_rgba(30,27,75,0.16)] border border-gray-200 pl-14 pr-10 py-9 min-h-[900px]">
+          {/* exam-sheet margin rule */}
+          <div aria-hidden className="absolute left-10 top-0 bottom-0 w-px bg-red-300/60" />
           <div className={SHEET_MD}>
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{previewMsg.content}</ReactMarkdown>
           </div>
@@ -774,6 +776,14 @@ export default function Home() {
 
   return (
     <div className="h-dvh flex bg-transparent text-gray-800">
+      {/* ── Decorative canvas: dot grid, drifting aurora blobs, film grain ── */}
+      <div aria-hidden className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
+        <div className="absolute inset-0 deco-grid" />
+        <div className="deco-blob-a absolute -top-24 -left-20 h-[26rem] w-[26rem] rounded-full bg-gradient-to-br from-indigo-300/50 to-violet-300/40 blur-3xl" />
+        <div className="deco-blob-b absolute -bottom-32 right-[-6rem] h-[30rem] w-[30rem] rounded-full bg-gradient-to-tr from-emerald-200/50 to-sky-200/40 blur-3xl" />
+        <div className="absolute inset-0 deco-grain" />
+      </div>
+
       {/* ── Lock screen (deployed instances with APP_ACCESS_TOKEN) ── */}
       {locked && (
         <div className="fixed inset-0 z-50 bg-gradient-to-br from-indigo-50 via-white to-violet-50 flex items-center justify-center p-6">
@@ -824,7 +834,7 @@ export default function Home() {
       <aside className={`${sidebarOpen ? "flex" : "hidden"} md:flex w-[262px] shrink-0 flex-col border-r border-white/60 bg-white/55 backdrop-blur-xl fixed md:static left-[76px] z-30 h-full`}>
         <div className={`p-3 flex items-center justify-between border-b ${nav === "papers" ? `${ACCENT.papers.softBorder} ${ACCENT.papers.panelTint}` : `${ACCENT.learn.softBorder} ${ACCENT.learn.panelTint}`}`}>
           <div>
-            <div className={`font-semibold text-[15px] inline-flex items-center gap-1.5 ${nav === "papers" ? ACCENT.papers.text : ACCENT.learn.text}`}>
+            <div className={`font-display font-semibold text-[15px] inline-flex items-center gap-1.5 ${nav === "papers" ? ACCENT.papers.text : ACCENT.learn.text}`}>
               {nav === "papers" ? <FileText size={14} /> : <GraduationCap size={14} />}
               {nav === "papers" ? "Paper Studio" : "Learn"}
             </div>
@@ -910,13 +920,13 @@ export default function Home() {
       {sidebarOpen && <div className="fixed inset-0 bg-black/30 z-20 md:hidden" onClick={() => setSidebarOpen(false)} />}
 
       {/* ── Main ── */}
-      <div className="flex-1 flex min-w-0">
+      <div className="relative z-10 flex-1 flex min-w-0">
         {/* Conversation column */}
         <div className={`flex flex-col min-w-0 ${isPaper && previewMsg ? "flex-1 lg:max-w-[52%]" : "flex-1"}`}>
           <header className="h-14 shrink-0 border-b border-white/60 bg-white/45 backdrop-blur-xl flex items-center justify-between px-4 gap-3">
             <div className="flex items-center gap-2 min-w-0">
               <button onClick={() => setSidebarOpen(true)} className="md:hidden text-gray-500 p-1.5" aria-label="Menu"><Menu size={20} /></button>
-              <span className="truncate font-medium text-gray-900">{current?.title || "New chat"}</span>
+              <span className="truncate font-display font-medium text-gray-900">{current?.title || "New chat"}</span>
               {isPaper ? (
                 <span className="shrink-0 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-violet-600 text-white">Paper</span>
               ) : contentReady ? (
@@ -947,7 +957,7 @@ export default function Home() {
                 isPaper ? (
                   <div className="min-h-[55vh] flex flex-col items-center justify-center text-center gap-4">
                     <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-violet-600 to-indigo-600 text-white grid place-items-center shadow-md shadow-violet-200"><FileText size={26} /></div>
-                    <div className="text-xl text-gray-900 font-semibold tracking-tight">Generate an exam paper from your material</div>
+                    <div className="font-display text-xl text-gray-900 font-semibold tracking-tight">Generate an exam paper from your material</div>
                     <ol className="text-sm text-gray-600 text-left space-y-1.5 max-w-md list-decimal pl-5">
                       <li>Attach a sample/past paper (file or photo) with <Paperclip size={12} className="inline" /> — it copies YOUR institute&apos;s exact format</li>
                       <li>Pick which <span className="text-gray-900 font-medium">references</span> to draw from below (or leave all)</li>
@@ -959,7 +969,7 @@ export default function Home() {
                 ) : contentReady ? (
                   <div className="min-h-[55vh] flex flex-col items-center justify-center text-center gap-4">
                     <Logo size={52} />
-                    <div className="text-xl text-gray-900 font-semibold tracking-tight">Your material is ready. What do you want to learn?</div>
+                    <div className="font-display text-xl text-gray-900 font-semibold tracking-tight">Your material is ready. What do you want to learn?</div>
                     <div className="flex flex-wrap gap-2 justify-center max-w-md">
                       <button onClick={() => send("Summarize the key ideas")} className="text-xs px-3.5 py-2 rounded-full border border-gray-300 bg-white text-gray-700 hover:border-indigo-400 hover:text-indigo-700 transition shadow-sm">Summarize the key ideas</button>
                       <button onClick={() => send("Explain the hardest concept simply")} className="text-xs px-3.5 py-2 rounded-full border border-gray-300 bg-white text-gray-700 hover:border-indigo-400 hover:text-indigo-700 transition shadow-sm">Explain the hardest concept simply</button>
@@ -969,40 +979,42 @@ export default function Home() {
                   </div>
                 ) : (
                   <div className="min-h-[60vh] flex flex-col items-center justify-center gap-6">
-                    <div className="flex flex-col items-center gap-2.5">
+                    <div className="flex flex-col items-center gap-3">
                       <div className="relative">
-                        <div className="absolute -inset-6 rounded-full bg-gradient-to-br from-indigo-400/40 via-violet-400/30 to-pink-300/30 blur-2xl" />
-                        <div className="relative"><Logo size={56} /></div>
+                        <div className="absolute -inset-8 rounded-full bg-gradient-to-br from-indigo-400/45 via-violet-400/35 to-pink-300/35 blur-2xl" />
+                        <div className="relative"><Logo size={60} /></div>
                       </div>
-                      <div className="text-2xl font-semibold tracking-tight bg-gradient-to-r from-indigo-700 via-violet-700 to-indigo-700 bg-clip-text text-transparent">Illomra</div>
-                      <div className="text-sm text-gray-500 -mt-1.5">Your material. Your answers. Your exam papers.</div>
+                      <div className="font-display anim-shimmer text-[34px] leading-none font-bold bg-gradient-to-r from-indigo-700 via-violet-500 to-indigo-700 bg-clip-text text-transparent">Illomra</div>
+                      <div className="font-display text-lg text-gray-700 -mt-1 text-center">Your material. <span className="text-indigo-600">Your answers.</span> <span className="text-violet-600">Your exam papers.</span></div>
                     </div>
-                    <label
-                      onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-                      onDragLeave={() => setDragOver(false)}
-                      onDrop={handleDrop}
-                      className={`w-full max-w-lg cursor-pointer rounded-2xl border-2 border-dashed p-8 text-center transition bg-gradient-to-b from-white to-indigo-50/50 shadow-sm ${dragOver ? "border-indigo-500 bg-indigo-50" : "border-indigo-200 hover:border-indigo-400"}`}
-                    >
-                      <input type="file" multiple accept=".pdf,.txt,.md,.csv,.docx,.pptx,.png,.jpg,.jpeg,.webp" onChange={handleUpload} className="hidden" disabled={!!busy} />
-                      <UploadCloud size={32} className="mx-auto text-indigo-500 mb-3" />
-                      <div className="text-gray-900 font-medium text-lg">Drop in your study material</div>
-                      <div className="text-sm text-gray-500 mt-1">Textbooks, notes, slides, past papers — PDF, Word, PPT, even a <span className="text-gray-700 font-medium">photo of handwritten notes</span></div>
-                      {busy && <div className="text-xs text-indigo-600 animate-pulse mt-3">{busy}</div>}
-                    </label>
+                    <div className="grad-border rounded-2xl w-full max-w-lg shadow-lg shadow-indigo-200/50">
+                      <label
+                        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                        onDragLeave={() => setDragOver(false)}
+                        onDrop={handleDrop}
+                        className={`block cursor-pointer rounded-[14.5px] p-8 text-center transition ${dragOver ? "bg-indigo-50" : "bg-white/90 backdrop-blur hover:bg-white"}`}
+                      >
+                        <input type="file" multiple accept=".pdf,.txt,.md,.csv,.docx,.pptx,.png,.jpg,.jpeg,.webp" onChange={handleUpload} className="hidden" disabled={!!busy} />
+                        <div className="mx-auto mb-3 h-12 w-12 rounded-2xl bg-gradient-to-br from-indigo-600 to-violet-600 text-white grid place-items-center shadow-lg shadow-indigo-500/30"><UploadCloud size={22} /></div>
+                        <div className="font-display text-gray-900 font-semibold text-lg">Drop in your study material</div>
+                        <div className="text-sm text-gray-500 mt-1">Textbooks, notes, slides, past papers — PDF, Word, PPT, even a <span className="text-gray-700 font-medium">photo of handwritten notes</span></div>
+                        {busy && <div className="text-xs text-indigo-600 animate-pulse mt-3">{busy}</div>}
+                      </label>
+                    </div>
                     <div className="grid sm:grid-cols-3 gap-3 w-full max-w-lg">
-                      <div className="rounded-xl border border-indigo-100 bg-gradient-to-b from-indigo-50/80 to-white p-3.5 shadow-sm">
-                        <div className="h-7 w-7 rounded-lg bg-indigo-600 text-white grid place-items-center mb-2"><BookOpen size={14} /></div>
-                        <div className="text-gray-900 font-medium text-[13px]">Ask your material</div>
+                      <div className="anim-float rounded-2xl border border-indigo-100 bg-gradient-to-b from-indigo-50/90 to-white/90 backdrop-blur p-3.5 shadow-md shadow-indigo-100/60 hover:-translate-y-1 hover:shadow-xl hover:shadow-indigo-200/60 transition-all" style={{ animationDelay: "0s" }}>
+                        <div className="h-8 w-8 rounded-xl bg-gradient-to-br from-indigo-500 to-indigo-700 text-white grid place-items-center mb-2 shadow-md shadow-indigo-500/30"><BookOpen size={15} /></div>
+                        <div className="font-display text-gray-900 font-semibold text-[13px]">Ask your material</div>
                         <p className="text-[11px] text-gray-500 mt-1 leading-relaxed">Every answer cited from YOUR books &amp; notes.</p>
                       </div>
-                      <div className="rounded-xl border border-emerald-100 bg-gradient-to-b from-emerald-50/80 to-white p-3.5 shadow-sm">
-                        <div className="h-7 w-7 rounded-lg bg-emerald-600 text-white grid place-items-center mb-2"><ListChecks size={14} /></div>
-                        <div className="text-gray-900 font-medium text-[13px]">Test yourself</div>
+                      <div className="anim-float rounded-2xl border border-emerald-100 bg-gradient-to-b from-emerald-50/90 to-white/90 backdrop-blur p-3.5 shadow-md shadow-emerald-100/60 hover:-translate-y-1 hover:shadow-xl hover:shadow-emerald-200/60 transition-all" style={{ animationDelay: "0.9s" }}>
+                        <div className="h-8 w-8 rounded-xl bg-gradient-to-br from-emerald-500 to-emerald-700 text-white grid place-items-center mb-2 shadow-md shadow-emerald-500/30"><ListChecks size={15} /></div>
+                        <div className="font-display text-gray-900 font-semibold text-[13px]">Test yourself</div>
                         <p className="text-[11px] text-gray-500 mt-1 leading-relaxed">Quizzes that re-drill what you got wrong.</p>
                       </div>
-                      <button onClick={newPaper} className="rounded-xl border border-violet-200 bg-gradient-to-b from-violet-50 to-white p-3.5 text-left hover:from-violet-100 transition shadow-sm">
-                        <div className="h-7 w-7 rounded-lg bg-violet-600 text-white grid place-items-center mb-2"><FileText size={14} /></div>
-                        <div className="text-violet-700 font-medium text-[13px]">Exam papers →</div>
+                      <button onClick={newPaper} className="anim-float rounded-2xl border border-violet-200 bg-gradient-to-b from-violet-50/90 to-white/90 backdrop-blur p-3.5 text-left shadow-md shadow-violet-100/60 hover:-translate-y-1 hover:shadow-xl hover:shadow-violet-200/70 transition-all" style={{ animationDelay: "1.8s" }}>
+                        <div className="h-8 w-8 rounded-xl bg-gradient-to-br from-violet-500 to-violet-700 text-white grid place-items-center mb-2 shadow-md shadow-violet-500/30"><FileText size={15} /></div>
+                        <div className="font-display text-violet-700 font-semibold text-[13px]">Exam papers →</div>
                         <p className="text-[11px] text-gray-500 mt-1 leading-relaxed">In your institute&apos;s exact format, with answer key.</p>
                       </button>
                     </div>
@@ -1012,7 +1024,7 @@ export default function Home() {
               )}
 
               {messages.map((m, i) => (
-                <div key={i} className={m.role === "user" ? "flex justify-end" : "flex justify-start gap-2.5"}>
+                <div key={i} className={`anim-fade-up ${m.role === "user" ? "flex justify-end" : "flex justify-start gap-2.5"}`}>
                   {m.role === "assistant" && <div className="shrink-0 mt-1.5 hidden sm:block"><Logo size={24} /></div>}
                   <div className={m.role === "user" ? "max-w-[85%] rounded-2xl rounded-br-md bg-gradient-to-br from-indigo-600 to-violet-600 text-white px-4 py-2.5 text-[15px] whitespace-pre-wrap shadow-md shadow-indigo-100" : "max-w-full flex-1 min-w-0"}>
                     {m.role === "assistant" ? (
@@ -1174,7 +1186,8 @@ export default function Home() {
               <button onClick={toggleVoice} disabled={connected === false} title="Voice to text (Chrome/Edge)" className={`h-12 w-12 shrink-0 grid place-items-center rounded-2xl border-2 transition disabled:opacity-40 ${listening ? "bg-red-50 border-red-300 text-red-500 animate-pulse" : "bg-white border-gray-200 text-gray-500 hover:border-indigo-300 hover:text-indigo-600"}`} aria-label="Voice input">
                 <Mic size={18} />
               </button>
-              <div className="flex-1 flex items-end rounded-2xl border-2 border-white/80 bg-white/90 backdrop-blur focus-within:border-indigo-400 focus-within:shadow-[0_0_0_4px_rgba(99,102,241,0.15),0_8px_28px_rgba(99,102,241,0.15)] transition shadow-md shadow-indigo-100/60">
+              <div className="flex-1 grad-border rounded-2xl shadow-md shadow-indigo-100/60 focus-within:shadow-[0_10px_36px_rgba(99,102,241,0.28)] transition-shadow">
+              <div className="flex items-end rounded-[14.5px] bg-white/95 backdrop-blur">
                 <textarea
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
@@ -1193,6 +1206,7 @@ export default function Home() {
                     <ArrowUp size={17} strokeWidth={2.5} />
                   </button>
                 )}
+              </div>
               </div>
             </div>
             <div className="max-w-3xl mx-auto mt-1.5 text-center text-[10px] text-gray-300">
