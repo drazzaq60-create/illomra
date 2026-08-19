@@ -1,8 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type DragEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import {
+  GraduationCap, BookOpen, FileText, MessageSquare, Pin, Pencil, Trash2, Plus,
+  Paperclip, Mic, ArrowUp, Square, Menu, Globe, Download, ListChecks, ScrollText,
+  UploadCloud, X, RotateCcw, FileDown,
+} from "lucide-react";
 import { api, type QuizQuestion, type Source, type Usage, type Stats, type Doc } from "@/lib/api";
 
 type Msg = {
@@ -10,16 +15,23 @@ type Msg = {
   content: string;
   type?: "quiz" | "paper";
   quiz?: QuizQuestion[];
+  quizAnswers?: Record<number, string>;
+  quizDone?: boolean;
   sources?: Source[];
   confidence?: number;
   latency?: number;
   web?: boolean;
 };
 
-type Convo = { id: string; title: string; messages: Msg[]; pinned?: boolean; kind?: "chat" | "paper" };
-
-const SUGGESTED = ["Summarize the key ideas", "Explain the hardest concept simply", "Give me an example"];
-const GENERAL_SUGGESTED = ["Explain a tricky concept simply", "Help me make a study plan", "Give me practice questions on a topic"];
+type Convo = {
+  id: string;
+  title: string;
+  messages: Msg[];
+  pinned?: boolean;
+  kind?: "chat" | "paper";
+  pattern?: string;     // attached format sample (paper conversations)
+  patternName?: string;
+};
 
 const MD =
   "text-[15px] leading-relaxed [&_h1]:text-lg [&_h1]:font-semibold [&_h1]:mt-3 [&_h2]:text-base [&_h2]:font-semibold [&_h2]:mt-3 [&_h3]:font-medium [&_h3]:mt-3 [&_p]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_ol]:my-2 [&_li]:my-1 [&_strong]:font-semibold [&_strong]:text-white [&_code]:bg-slate-700 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-emerald-300 [&_hr]:border-slate-700 [&_hr]:my-3 [&_a]:text-emerald-400 [&_a]:underline";
@@ -30,15 +42,29 @@ function fmtNum(n: number): string {
   return String(n);
 }
 
+function shortName(s: string, max = 26): string {
+  return s.length > max ? s.slice(0, max - 1) + "…" : s;
+}
+
 function makeConvo(kind: "chat" | "paper" = "chat"): Convo {
   const id = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : String(Date.now());
   return { id, title: kind === "paper" ? "New paper" : "New chat", messages: [], kind };
 }
 
-function QuizCard({ questions }: { questions: QuizQuestion[] }) {
-  const [answers, setAnswers] = useState<Record<number, string>>({});
-  const [done, setDone] = useState(false);
+/* ── Quiz card: answers persist on the message, so a reload shows the finished quiz ── */
+function QuizCard({ questions, saved, savedDone, onAnswer, onComplete, onRetry, onPractice }: {
+  questions: QuizQuestion[];
+  saved: Record<number, string>;
+  savedDone: boolean;
+  onAnswer: (answers: Record<number, string>) => void;
+  onComplete: () => void;
+  onRetry: () => void;
+  onPractice: (missed: string[]) => void;
+}) {
+  const answers = saved;
+  const done = savedDone;
   const score = questions.reduce((n, q, i) => n + (answers[i] === q.answer ? 1 : 0), 0);
+  const missed = questions.filter((q, i) => answers[i] !== q.answer).map((q) => q.question);
   return (
     <div className="space-y-4">
       {questions.map((q, i) => (
@@ -55,7 +81,7 @@ function QuizCard({ questions }: { questions: QuizQuestion[] }) {
                 else cls = "border-slate-800 text-slate-500";
               } else if (chosen) cls = "border-emerald-500/60 bg-emerald-500/5";
               return (
-                <button key={letter} disabled={done} onClick={() => setAnswers((a) => ({ ...a, [i]: letter }))} className={`w-full text-left text-sm px-3 py-2 rounded-lg border transition ${cls}`}>
+                <button key={letter} disabled={done} onClick={() => onAnswer({ ...answers, [i]: letter })} className={`w-full text-left text-sm px-3 py-2 rounded-lg border transition ${cls}`}>
                   <span className="font-medium mr-1.5">{letter})</span>{text}
                 </button>
               );
@@ -65,11 +91,23 @@ function QuizCard({ questions }: { questions: QuizQuestion[] }) {
         </div>
       ))}
       {!done ? (
-        <button onClick={() => setDone(true)} disabled={Object.keys(answers).length < questions.length} className="w-full py-2 rounded-lg bg-emerald-500 text-slate-950 font-medium text-sm hover:bg-emerald-400 disabled:opacity-40 transition">Submit answers</button>
+        <button onClick={onComplete} disabled={Object.keys(answers).length < questions.length} className="w-full py-2 rounded-lg bg-emerald-500 text-slate-950 font-medium text-sm hover:bg-emerald-400 disabled:opacity-40 transition">Submit answers</button>
       ) : (
-        <div className="text-center">
-          <div className="text-2xl font-bold text-emerald-400">{score} / {questions.length}</div>
-          <div className="text-xs text-slate-500">{Math.round((score / questions.length) * 100)}% correct</div>
+        <div className="space-y-3">
+          <div className="text-center">
+            <div className="text-2xl font-bold text-emerald-400">{score} / {questions.length}</div>
+            <div className="text-xs text-slate-500">{Math.round((score / questions.length) * 100)}% correct</div>
+          </div>
+          <div className="flex flex-wrap gap-2 justify-center">
+            <button onClick={onRetry} className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-slate-700 text-slate-300 hover:border-emerald-500/50 transition">
+              <RotateCcw size={13} /> Try again
+            </button>
+            {missed.length > 0 && (
+              <button onClick={() => onPractice(missed)} className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/25 transition">
+                <ListChecks size={13} /> Practice my mistakes
+              </button>
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -83,31 +121,40 @@ export default function Home() {
 
   const [connected, setConnected] = useState<boolean | null>(null);
   const [docs, setDocs] = useState<Doc[]>([]);
-  const [scopeSource, setScopeSource] = useState(""); // "" = all documents
+  const [scopeSource, setScopeSource] = useState(""); // "" = all materials
   const [stats, setStats] = useState<Stats>({ documents: 0, chunks: 0 });
   const [input, setInput] = useState("");
   const [thinking, setThinking] = useState(false);
   const [thinkingNote, setThinkingNote] = useState("");
+  const [streaming, setStreaming] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [url, setUrl] = useState("");
   const [showAdd, setShowAdd] = useState(false);
   const [usage, setUsage] = useState<Usage | null>(null);
-  const [cost, setCost] = useState("");
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [quizLoading, setQuizLoading] = useState(false);
-  const [examPattern, setExamPattern] = useState("");
-  const [examName, setExamName] = useState("");
-  const [examLoading, setExamLoading] = useState(false);
+  const [quizCount, setQuizCount] = useState(5);
+  const [patternLoading, setPatternLoading] = useState(false);
+  const [paperKey, setPaperKey] = useState(true);
+  const [paperDifficulty, setPaperDifficulty] = useState("");
+  const [paperMarks, setPaperMarks] = useState("");
   const [listening, setListening] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
+  const [dragOver, setDragOver] = useState(false);
 
   const recognitionRef = useRef<{ stop: () => void; start: () => void } | null>(null);
   const voiceBaseRef = useRef("");
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const saveTimerRef = useRef<number | null>(null);
 
+  /* ── Persistence (debounced; survives streaming without re-serializing every token) ── */
+  // Canonical client-only localStorage hydration — must run in a mount effect
+  // (localStorage doesn't exist during SSR), so the strict hooks rule is off here.
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     let loaded: Convo[] = [];
     try {
@@ -126,11 +173,22 @@ export default function Home() {
     setConvos(loaded);
     setHydrated(true);
   }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
     if (!hydrated) return;
-    localStorage.setItem("studymind_convos", JSON.stringify(convos));
-    localStorage.setItem("studymind_current", currentId);
+    if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = window.setTimeout(() => {
+      try {
+        localStorage.setItem("studymind_convos", JSON.stringify(convos));
+        localStorage.setItem("studymind_current", currentId);
+      } catch {
+        flashError("Browser storage is full — delete some old chats, or use Export chats.");
+      }
+    }, 400);
+    return () => {
+      if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
+    };
   }, [convos, currentId, hydrated]);
 
   async function refreshDocs() {
@@ -143,32 +201,35 @@ export default function Home() {
     }
   }
 
+  // Mount-only backend handshake (async — state lands after the fetch resolves).
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     api.health().then(() => setConnected(true)).catch(() => setConnected(false));
     refreshDocs();
   }, []);
-
-  // If the scoped document gets deleted, fall back to "all documents".
-  useEffect(() => {
-    if (scopeSource && !docs.some((d) => d.source === scopeSource)) setScopeSource("");
-  }, [docs, scopeSource]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const current = convos.find((c) => c.id === currentId);
   const messages = current?.messages ?? [];
+  const pattern = current?.pattern ?? "";
+  const patternName = current?.patternName ?? "";
+  const isPaper = current?.kind === "paper";
+  // Derived: if the scoped document was deleted, behave as "all materials".
+  const effectiveScope = scopeSource && docs.some((d) => d.source === scopeSource) ? scopeSource : "";
 
+  // Auto-scroll — also while an answer streams (tracks last message growth).
+  const lastLen = messages.length ? messages[messages.length - 1].content.length : 0;
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages.length, thinking]);
-
-  useEffect(() => {
-    setExamPattern("");
-    setExamName("");
-    setRenamingId(null);
-  }, [currentId]);
+  }, [messages.length, lastLen, thinking, quizLoading, summaryLoading]);
 
   function flashError(m: string) {
     setError(m);
     window.setTimeout(() => setError(null), 6000);
+  }
+
+  function updateConvo(id: string, patch: Partial<Convo>) {
+    setConvos((prev) => prev.map((c) => (c.id === id ? { ...c, ...patch } : c)));
   }
 
   function setMessages(updater: (m: Msg[]) => Msg[]) {
@@ -177,7 +238,7 @@ export default function Home() {
         if (c.id !== currentId) return c;
         const msgs = updater(c.messages);
         const firstUser = msgs.find((x) => x.role === "user");
-        const title = c.title === "New chat" && firstUser ? firstUser.content.slice(0, 42) : c.title;
+        const title = (c.title === "New chat" || c.title === "New paper") && firstUser ? firstUser.content.slice(0, 42) : c.title;
         return { ...c, messages: msgs, title };
       }),
     );
@@ -215,33 +276,55 @@ export default function Home() {
   }
 
   function deleteChat(id: string) {
-    setConvos((prev) => {
-      const next = prev.filter((c) => c.id !== id);
-      if (next.length === 0) {
-        const c = makeConvo();
-        setCurrentId(c.id);
-        return [c];
-      }
-      if (id === currentId) setCurrentId(next[0].id);
-      return next;
-    });
+    const next = convos.filter((c) => c.id !== id);
+    if (next.length === 0) {
+      const c = makeConvo();
+      setConvos([c]);
+      setCurrentId(c.id);
+      return;
+    }
+    setConvos(next);
+    if (id === currentId) setCurrentId(next[0].id);
+  }
+
+  function exportChats() {
+    const blob = new Blob([JSON.stringify(convos, null, 2)], { type: "application/json" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = "studymind-chats.json";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(link.href);
   }
 
   const contentReady = stats.chunks > 0;
 
-  async function handleUpload(e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setBusy(`Indexing ${file.name}…`);
-    try {
-      await api.upload(file);
-      await refreshDocs();
-    } catch (err) {
-      flashError(err instanceof Error ? err.message : "Upload failed");
-    } finally {
-      setBusy(null);
-      e.target.value = "";
+  /* ── Uploading (multi-file + drag & drop) ── */
+  async function uploadFiles(files: FileList | File[]) {
+    const list = Array.from(files);
+    if (!list.length) return;
+    for (const file of list) {
+      setBusy(`Indexing ${file.name}…`);
+      try {
+        await api.upload(file);
+      } catch (err) {
+        flashError(err instanceof Error ? err.message : `Upload failed: ${file.name}`);
+      }
     }
+    setBusy(null);
+    await refreshDocs();
+  }
+
+  async function handleUpload(e: ChangeEvent<HTMLInputElement>) {
+    if (e.target.files) await uploadFiles(e.target.files);
+    e.target.value = "";
+  }
+
+  function handleDrop(e: DragEvent) {
+    e.preventDefault();
+    setDragOver(false);
+    if (e.dataTransfer.files?.length) uploadFiles(e.dataTransfer.files);
   }
 
   async function handleUrl() {
@@ -269,117 +352,145 @@ export default function Home() {
   }
 
   async function clearKnowledge() {
-    if (!window.confirm("Remove ALL indexed documents? This can't be undone.")) return;
+    if (!window.confirm("Remove ALL your materials? This can't be undone.")) return;
     try {
       await api.reset();
       setScopeSource("");
       await refreshDocs();
     } catch (err) {
-      flashError(err instanceof Error ? err.message : "Could not clear the knowledge base");
+      flashError(err instanceof Error ? err.message : "Could not clear your materials");
     }
+  }
+
+  /* ── Chat ── */
+  function composePaperOpts(): string {
+    if (!isPaper) return "";
+    const parts: string[] = [];
+    parts.push(paperKey
+      ? "Include a full answer key and marking scheme at the end, under '## Answer Key & Marking Scheme'."
+      : "Do not include an answer key.");
+    if (paperDifficulty) parts.push(`Difficulty mix: ${paperDifficulty}.`);
+    if (paperMarks.trim()) parts.push(`Total marks: ${paperMarks.trim()}.`);
+    return parts.join(" ");
   }
 
   async function send(question: string) {
     const q = question.trim();
-    if (!q || thinking) return;
+    if (!q || thinking || streaming) return;
     const history = messages.map((m) => ({ role: m.role, content: m.content }));
     setMessages((m) => [...m, { role: "user", content: q }]);
     setInput("");
     setThinking(true);
     setThinkingNote("");
+    setStreaming(true);
+    abortRef.current = new AbortController();
     let started = false;
+    const msgType: Msg["type"] = isPaper ? "paper" : undefined;
     try {
       await api.chatStream(
-        q,
-        history,
-        current?.kind === "paper" ? examPattern : "",
-        scopeSource,
-        (tok) => {
-          if (!started) {
-            started = true;
-            setThinking(false);
-            setThinkingNote("");
-            setMessages((m) => [...m, { role: "assistant", content: tok }]);
-          } else {
+        { question: q, history, pattern: isPaper ? pattern : "", source: effectiveScope, paperOpts: composePaperOpts() },
+        {
+          onToken: (tok) => {
+            if (!started) {
+              started = true;
+              setThinking(false);
+              setThinkingNote("");
+              setMessages((m) => [...m, { role: "assistant", content: tok, type: msgType }]);
+            } else {
+              setMessages((m) => {
+                const copy = [...m];
+                const last = copy[copy.length - 1];
+                if (last && last.role === "assistant") copy[copy.length - 1] = { ...last, content: last.content + tok };
+                return copy;
+              });
+            }
+          },
+          onNotice: (note) => setThinkingNote(note),
+          onDone: (meta) => {
+            if (meta.error) {
+              flashError(meta.error);
+              if (!started) setMessages((m) => [...m, { role: "assistant", content: "⚠️ " + meta.error }]);
+              return;
+            }
+            setUsage(meta.usage ?? null);
+            // Empty/blank answer: still show a real bubble instead of a dead turn.
+            if (!started) {
+              started = true;
+              setThinking(false);
+              setMessages((m) => [...m, { role: "assistant", content: "I couldn't find an answer in your material for that. Try rephrasing, or change \"Answering from\" below.", type: msgType, sources: meta.sources, confidence: meta.confidence, latency: meta.latency_ms, web: meta.web_used }]);
+              return;
+            }
             setMessages((m) => {
               const copy = [...m];
               const last = copy[copy.length - 1];
-              if (last && last.role === "assistant") copy[copy.length - 1] = { ...last, content: last.content + tok };
+              if (last && last.role === "assistant") copy[copy.length - 1] = { ...last, sources: meta.sources, confidence: meta.confidence, latency: meta.latency_ms, web: meta.web_used };
               return copy;
             });
-          }
+          },
         },
-        (note) => setThinkingNote(note),
-        (meta) => {
-          if (meta.error) {
-            flashError(meta.error);
-            if (!started) setMessages((m) => [...m, { role: "assistant", content: "⚠️ " + meta.error }]);
-            return;
-          }
-          setUsage(meta.usage ?? null);
-          setCost(meta.cost ?? "");
-          // Empty/blank answer: still show a real bubble instead of a dead turn.
-          if (!started) {
-            started = true;
-            setThinking(false);
-            setMessages((m) => [...m, { role: "assistant", content: "I couldn't find an answer in your material for that. Try rephrasing, or check the document scope above.", sources: meta.sources, confidence: meta.confidence, latency: meta.latency_ms, web: meta.web_used }]);
-            return;
-          }
-          setMessages((m) => {
-            const copy = [...m];
-            const last = copy[copy.length - 1];
-            if (last && last.role === "assistant") copy[copy.length - 1] = { ...last, sources: meta.sources, confidence: meta.confidence, latency: meta.latency_ms, web: meta.web_used };
-            return copy;
-          });
-        },
+        abortRef.current.signal,
       );
     } catch (err) {
-      flashError(err instanceof Error ? err.message : "Chat failed");
-      if (!started) setMessages((m) => [...m, { role: "assistant", content: "⚠️ Something went wrong — is the backend running?" }]);
+      if (err instanceof DOMException && err.name === "AbortError") {
+        // user pressed stop — keep whatever streamed
+      } else {
+        flashError(err instanceof Error ? err.message : "Chat failed");
+        if (!started) setMessages((m) => [...m, { role: "assistant", content: "⚠️ Something went wrong — is the backend running?" }]);
+      }
     } finally {
       setThinking(false);
       setThinkingNote("");
+      setStreaming(false);
+      abortRef.current = null;
     }
   }
 
+  function stopStreaming() {
+    abortRef.current?.abort();
+  }
+
   async function genSummary() {
-    if (thinking) return;
+    if (thinking || streaming || summaryLoading) return;
     setSummaryLoading(true);
     try {
-      const res = await api.summary(scopeSource);
-      setMessages((m) => [...m, { role: "assistant", content: "## 📋 Summary\n\n" + (res.summary || "") }]);
+      const res = await api.summary(effectiveScope);
+      setMessages((m) => [...m, { role: "assistant", content: "## 📋 Study notes\n\n" + (res.summary || "") }]);
     } catch (err) {
-      flashError(err instanceof Error ? err.message : "Summary failed");
+      flashError(err instanceof Error ? err.message : "Couldn't build study notes");
     } finally {
       setSummaryLoading(false);
     }
   }
 
-  async function genQuiz() {
-    if (thinking) return;
+  async function genQuiz(topic = "") {
+    if (thinking || streaming || quizLoading) return;
     setQuizLoading(true);
     try {
-      const res = await api.quiz(5, scopeSource);
-      setMessages((m) => [...m, { role: "assistant", type: "quiz", content: "Here's a quick quiz to test yourself:", quiz: res.questions }]);
+      const res = await api.quiz(quizCount, effectiveScope, topic);
+      const intro = topic ? "Round two — focused on what you missed:" : "Test yourself — from your own material:";
+      setMessages((m) => [...m, { role: "assistant", type: "quiz", content: intro, quiz: res.questions, quizAnswers: {}, quizDone: false }]);
     } catch (err) {
-      flashError(err instanceof Error ? err.message : "Quiz failed");
+      flashError(err instanceof Error ? err.message : "Couldn't build the quiz");
     } finally {
       setQuizLoading(false);
     }
   }
 
+  function patchMessage(index: number, patch: Partial<Msg>) {
+    setMessages((m) => m.map((msg, i) => (i === index ? { ...msg, ...patch } : msg)));
+  }
+
   async function handlePatternUpload(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
-    if (!file) return;
-    setExamLoading(true);
+    if (!file || !current) return;
+    setPatternLoading(true);
     try {
       const res = await api.extract(file);
-      setExamPattern(res.text || "");
-      setExamName(file.name);
+      updateConvo(current.id, { pattern: res.text || "", patternName: file.name });
     } catch (err) {
       flashError(err instanceof Error ? err.message : "Could not read that paper");
     } finally {
-      setExamLoading(false);
+      setPatternLoading(false);
       e.target.value = "";
     }
   }
@@ -387,8 +498,8 @@ export default function Home() {
   async function downloadPaper(text: string, fmt: string) {
     try {
       await api.exportPaper(text, fmt);
-    } catch {
-      flashError("Download failed — is the backend running?");
+    } catch (err) {
+      flashError(err instanceof Error ? err.message : "Download failed — is the backend running?");
     }
   }
 
@@ -439,29 +550,33 @@ export default function Home() {
 
   const ctxPct = usage ? Math.max(0.6, (usage.input_tokens / usage.context_window) * 100) : 0;
   const sessionTokens = usage ? usage.session_input + usage.session_output : 0;
+  const generating = thinking || streaming || quizLoading || summaryLoading;
 
   return (
-    <div className="h-screen flex bg-[#0b0f17] text-slate-200">
+    <div className="h-dvh flex bg-[#0b0f17] text-slate-200">
       {/* ── Sidebar ── */}
       <aside className={`${sidebarOpen ? "flex" : "hidden"} md:flex w-64 shrink-0 flex-col border-r border-slate-800 bg-[#080b11] fixed md:static z-30 h-full`}>
-        <div className="p-3 flex items-center gap-2">
-          <div className="h-8 w-8 rounded-lg bg-emerald-500/15 text-emerald-400 grid place-items-center">🎓</div>
-          <div className="font-semibold">StudyMind</div>
+        <div className="p-3">
+          <div className="flex items-center gap-2">
+            <div className="h-8 w-8 rounded-lg bg-emerald-500/15 text-emerald-400 grid place-items-center"><GraduationCap size={17} /></div>
+            <div className="font-semibold">StudyMind</div>
+          </div>
+          <div className="mt-1 text-[11px] text-slate-500">Answers from your material — not the internet.</div>
         </div>
         <div className="px-3 grid grid-cols-2 gap-2">
           <button onClick={newChat} className="flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg border border-slate-700 hover:border-emerald-500/50 hover:bg-slate-800/50 text-sm transition">
-            <span className="text-base leading-none">＋</span> Chat
+            <Plus size={14} /> Chat
           </button>
           <button onClick={newPaper} className="flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 text-sm transition">
-            <span className="text-base leading-none">＋</span> Paper
+            <FileText size={14} /> Exam paper
           </button>
         </div>
 
         <div className="mt-3 px-2 flex-1 overflow-y-auto">
           <div className="px-2 text-[11px] uppercase tracking-wide text-slate-600 mb-1">Chats</div>
           {[...convos].sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)).map((c) => (
-            <div key={c.id} className={`group flex items-center gap-1 rounded-lg px-2 py-1.5 text-sm cursor-pointer transition ${c.id === currentId ? "bg-slate-800 text-slate-100" : "text-slate-400 hover:bg-slate-800/50"}`} onClick={() => { setCurrentId(c.id); setSidebarOpen(false); }}>
-              <span className="shrink-0 text-xs">{c.kind === "paper" ? "📝" : "💬"}</span>
+            <div key={c.id} className={`group flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm cursor-pointer transition ${c.id === currentId ? "bg-slate-800 text-slate-100" : "text-slate-400 hover:bg-slate-800/50"}`} onClick={() => { setCurrentId(c.id); setSidebarOpen(false); }}>
+            <span className="shrink-0 text-slate-500">{c.kind === "paper" ? <FileText size={13} /> : <MessageSquare size={13} />}</span>
               {renamingId === c.id ? (
                 <input
                   autoFocus
@@ -473,47 +588,47 @@ export default function Home() {
                   className="flex-1 min-w-0 bg-slate-900 border border-emerald-500/40 rounded px-1 py-0.5 text-sm outline-none"
                 />
               ) : (
-                <span className="truncate flex-1">{c.pinned && <span className="text-emerald-500 mr-0.5">📌</span>}{c.title || "Untitled"}</span>
+                <span className="truncate flex-1 inline-flex items-center gap-1">{c.pinned && <Pin size={11} className="text-emerald-500 shrink-0" />}{c.title || "Untitled"}</span>
               )}
-              <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 shrink-0">
-                <button onClick={(e) => { e.stopPropagation(); togglePin(c.id); }} title={c.pinned ? "Unpin" : "Pin"} className="text-slate-500 hover:text-emerald-400 text-xs">📌</button>
-                <button onClick={(e) => { e.stopPropagation(); startRename(c); }} title="Rename" className="text-slate-500 hover:text-slate-200 text-xs">✎</button>
-                <button onClick={(e) => { e.stopPropagation(); deleteChat(c.id); }} title="Delete" className="text-slate-500 hover:text-red-400 text-xs">🗑</button>
+              <div className="opacity-100 md:opacity-0 md:group-hover:opacity-100 flex items-center gap-1.5 shrink-0">
+                <button onClick={(e) => { e.stopPropagation(); togglePin(c.id); }} title={c.pinned ? "Unpin" : "Pin"} aria-label={c.pinned ? "Unpin chat" : "Pin chat"} className="text-slate-500 hover:text-emerald-400"><Pin size={13} /></button>
+                <button onClick={(e) => { e.stopPropagation(); startRename(c); }} title="Rename" aria-label="Rename chat" className="text-slate-500 hover:text-slate-200"><Pencil size={13} /></button>
+                <button onClick={(e) => { e.stopPropagation(); deleteChat(c.id); }} title="Delete" aria-label="Delete chat" className="text-slate-500 hover:text-red-400"><Trash2 size={13} /></button>
               </div>
             </div>
           ))}
         </div>
 
-        {/* Knowledge — the document manager */}
+        {/* My materials — the document manager */}
         <div className="border-t border-slate-800 p-3 space-y-2">
           <div className="flex items-center justify-between">
-            <span className="text-sm text-slate-300">📚 Knowledge {stats.chunks ? <span className="text-slate-600">· {stats.chunks} chunks</span> : null}</span>
-            <button onClick={() => setShowAdd((v) => !v)} className="text-xs text-emerald-400 hover:text-emerald-300">{showAdd ? "Close" : "＋ Add"}</button>
+            <span className="text-sm text-slate-300 inline-flex items-center gap-1.5"><BookOpen size={14} className="text-emerald-400" /> My materials</span>
+            <button onClick={() => setShowAdd((v) => !v)} className="text-xs text-emerald-400 hover:text-emerald-300">{showAdd ? "Close" : "+ Add"}</button>
           </div>
 
           {docs.length > 0 ? (
             <div className="space-y-1 max-h-44 overflow-y-auto">
               {docs.map((d) => (
                 <div key={d.source} className="group flex items-center gap-1.5 text-xs bg-slate-800/40 rounded-lg px-2 py-1.5">
-                  <span className="truncate flex-1" title={d.source}>{d.source}</span>
-                  <span className="text-slate-600 shrink-0">{d.chunks}</span>
-                  <button onClick={() => removeDoc(d.source)} title="Remove this document" className="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-red-400 shrink-0">🗑</button>
+                  <FileText size={12} className="shrink-0 text-slate-500" />
+                  <span className="truncate flex-1" title={`${d.source} · ${d.chunks} sections`}>{d.source}</span>
+                  <button onClick={() => removeDoc(d.source)} title="Remove this material" aria-label="Remove this material" className="opacity-100 md:opacity-0 md:group-hover:opacity-100 text-slate-500 hover:text-red-400 shrink-0"><Trash2 size={12} /></button>
                 </div>
               ))}
-              <button onClick={clearKnowledge} className="w-full text-[11px] text-slate-500 hover:text-red-400 pt-1">Clear all documents</button>
+              <button onClick={clearKnowledge} className="w-full text-[11px] text-slate-500 hover:text-red-400 pt-1 text-left px-2">Clear all materials</button>
             </div>
           ) : (
-            <div className="text-[11px] text-slate-600">No documents yet — add one below.</div>
+            <div className="text-[11px] text-slate-600">Nothing yet — add your notes, books, or slides.</div>
           )}
 
           {showAdd && (
             <div className="space-y-2 pt-1 border-t border-slate-800/60">
               <label className={`block rounded-lg border border-dashed p-2 text-center cursor-pointer text-xs transition ${busy ? "opacity-50 pointer-events-none" : "border-slate-700 hover:border-emerald-500/50"}`}>
-                <input type="file" accept=".pdf,.txt,.md,.csv,.docx,.pptx" onChange={handleUpload} className="hidden" disabled={!!busy} />
-                📄 Upload file <span className="text-slate-500">(PDF/Word/PPT/…)</span>
+                <input type="file" multiple accept=".pdf,.txt,.md,.csv,.docx,.pptx" onChange={handleUpload} className="hidden" disabled={!!busy} />
+                <span className="inline-flex items-center gap-1.5 justify-center"><UploadCloud size={13} /> Upload files <span className="text-slate-500">(PDF/Word/PPT)</span></span>
               </label>
               <div className="flex gap-1">
-                <input value={url} onChange={(e) => setUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") handleUrl(); }} placeholder="Paste any link" disabled={!!busy} className="flex-1 rounded-lg bg-slate-800/60 border border-slate-700 outline-none px-2 py-1.5 text-xs placeholder:text-slate-600" />
+                <input value={url} onChange={(e) => setUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") handleUrl(); }} placeholder="Paste any link or YouTube URL" disabled={!!busy} className="flex-1 rounded-lg bg-slate-800/60 border border-slate-700 outline-none px-2 py-1.5 text-xs placeholder:text-slate-600" />
                 <button onClick={handleUrl} disabled={!!busy || !url.trim()} className="px-2 rounded-lg bg-slate-800 text-slate-200 text-xs hover:bg-slate-700 disabled:opacity-40">Add</button>
               </div>
               {busy && <div className="text-[11px] text-emerald-400 animate-pulse">{busy}</div>}
@@ -521,14 +636,19 @@ export default function Home() {
           )}
         </div>
 
-        {/* Usage */}
-        {usage && (
-          <div className="border-t border-slate-800 px-3 py-2 text-[11px] text-slate-500">
-            <div className="flex justify-between mb-1"><span>context</span><span>{fmtNum(usage.input_tokens)} / 1M</span></div>
-            <div className="h-1 rounded-full bg-slate-800 overflow-hidden"><div className="h-full bg-emerald-400 rounded-full" style={{ width: `${ctxPct}%` }} /></div>
-            <div className="mt-1 flex justify-between"><span>session {fmtNum(sessionTokens)} tok</span><span>{cost}</span></div>
-          </div>
-        )}
+        {/* Footer: export + usage (tucked away — not developer telemetry in the user's face) */}
+        <div className="border-t border-slate-800 px-3 py-2 flex items-center justify-between text-[11px] text-slate-600">
+          <button onClick={exportChats} className="inline-flex items-center gap-1 hover:text-slate-300" title="Download all chats as JSON"><FileDown size={11} /> Export chats</button>
+          {usage && (
+            <details className="relative">
+              <summary className="cursor-pointer list-none hover:text-slate-300">{fmtNum(sessionTokens)} tok</summary>
+              <div className="absolute bottom-6 right-0 w-44 rounded-lg border border-slate-700 bg-[#0f172a] p-2 shadow-lg z-40">
+                <div className="flex justify-between mb-1"><span>context</span><span>{fmtNum(usage.input_tokens)} / 1M</span></div>
+                <div className="h-1 rounded-full bg-slate-800 overflow-hidden"><div className="h-full bg-emerald-400 rounded-full" style={{ width: `${ctxPct}%` }} /></div>
+              </div>
+            </details>
+          )}
+        </div>
       </aside>
 
       {sidebarOpen && <div className="fixed inset-0 bg-black/50 z-20 md:hidden" onClick={() => setSidebarOpen(false)} />}
@@ -537,48 +657,78 @@ export default function Home() {
       <div className="flex-1 flex flex-col min-w-0">
         <header className="h-14 shrink-0 border-b border-slate-800 flex items-center justify-between px-4 gap-3">
           <div className="flex items-center gap-2 min-w-0">
-            <button onClick={() => setSidebarOpen(true)} className="md:hidden text-slate-400 text-xl" aria-label="Menu">☰</button>
+            <button onClick={() => setSidebarOpen(true)} className="md:hidden text-slate-400 p-1.5" aria-label="Menu"><Menu size={20} /></button>
             <span className="truncate font-medium">{current?.title || "New chat"}</span>
+            {isPaper && <span className="shrink-0 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Paper mode</span>}
           </div>
-          <div className="flex items-center gap-2">
-            <button onClick={genSummary} disabled={!contentReady || summaryLoading} className="text-xs px-3 py-1.5 rounded-lg border border-slate-700 text-slate-300 hover:border-emerald-500/50 disabled:opacity-40 transition">{summaryLoading ? "…" : "Summary"}</button>
-            <button onClick={genQuiz} disabled={!contentReady || quizLoading} className="text-xs px-3 py-1.5 rounded-lg border border-slate-700 text-slate-300 hover:border-emerald-500/50 disabled:opacity-40 transition">{quizLoading ? "…" : "Quiz"}</button>
-            {/* Paper/document generation now lives in the chat: attach a format with 📎 and just ask. */}
-            {connected === false ? (
-              <span className="text-xs px-2 py-1 rounded-full bg-red-500/10 text-red-400">● offline</span>
-            ) : (
-              <span className="text-xs px-2 py-1 rounded-full bg-emerald-500/10 text-emerald-400">● online</span>
-            )}
-          </div>
+          {connected === null ? (
+            <span className="text-xs px-2 py-1 rounded-full bg-slate-700/30 text-slate-400">● connecting…</span>
+          ) : connected === false ? (
+            <span className="text-xs px-2 py-1 rounded-full bg-red-500/10 text-red-400">● offline</span>
+          ) : (
+            <span className="text-xs px-2 py-1 rounded-full bg-emerald-500/10 text-emerald-400">● online</span>
+          )}
         </header>
 
-        {error && <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-40 rounded-lg bg-red-600 text-white text-sm px-4 py-2 shadow-lg">{error}</div>}
+        {error && <div className="fixed bottom-28 left-1/2 -translate-x-1/2 z-40 rounded-lg bg-red-600 text-white text-sm px-4 py-2 shadow-lg max-w-[90vw]">{error}</div>}
 
         <div className="flex-1 overflow-y-auto">
           <div className="max-w-3xl mx-auto px-4 py-6 space-y-5">
             {messages.length === 0 && (
-              <div className="h-[55vh] flex flex-col items-center justify-center text-center text-slate-500 gap-4">
-                <div className="text-5xl">{current?.kind === "paper" ? "📝" : "🎓"}</div>
-                <div className="text-lg text-slate-300">{current?.kind === "paper" ? "Generate a paper or document" : "What do you want to learn?"}</div>
-                {current?.kind === "paper" ? (
-                  <p className="text-sm max-w-sm">Attach a format sample with the 📎, then describe what you want — e.g. &quot;make a 10-MCQ paper in this format from chapter 3&quot;. Add source docs in 📚 Knowledge.</p>
-                ) : contentReady ? (
+              isPaper ? (
+                /* ── Paper-mode empty state ── */
+                <div className="min-h-[55vh] flex flex-col items-center justify-center text-center gap-4">
+                  <div className="h-14 w-14 rounded-2xl bg-emerald-500/10 text-emerald-400 grid place-items-center"><FileText size={26} /></div>
+                  <div className="text-lg text-slate-200 font-medium">Generate an exam paper from your material</div>
+                  <ol className="text-sm text-slate-400 text-left space-y-1.5 max-w-sm list-decimal pl-5">
+                    <li>Attach a sample/past paper with <Paperclip size={12} className="inline" /> so it copies YOUR institute&apos;s format</li>
+                    <li>Set answer key, difficulty and marks below</li>
+                    <li>Describe the paper — e.g. <span className="text-slate-300">&quot;50-mark paper from chapter 3, Q1 scenario-based&quot;</span></li>
+                  </ol>
+                  {!contentReady && <p className="text-xs text-slate-500">Tip: add your course material in <span className="text-emerald-400">My materials</span> first.</p>}
+                </div>
+              ) : contentReady ? (
+                /* ── Materials loaded: study-focused starters ── */
+                <div className="min-h-[55vh] flex flex-col items-center justify-center text-center gap-4">
+                  <div className="h-14 w-14 rounded-2xl bg-emerald-500/10 text-emerald-400 grid place-items-center"><GraduationCap size={26} /></div>
+                  <div className="text-lg text-slate-200 font-medium">Your material is ready. What do you want to learn?</div>
                   <div className="flex flex-wrap gap-2 justify-center max-w-md">
-                    {SUGGESTED.map((s) => (
-                      <button key={s} onClick={() => send(s)} className="text-xs px-3 py-1.5 rounded-full border border-slate-700 text-slate-300 hover:border-emerald-500/50 hover:text-emerald-300 transition">{s}</button>
-                    ))}
+                    <button onClick={() => send("Summarize the key ideas")} className="text-xs px-3 py-1.5 rounded-full border border-slate-700 text-slate-300 hover:border-emerald-500/50 hover:text-emerald-300 transition">Summarize the key ideas</button>
+                    <button onClick={() => send("Explain the hardest concept simply")} className="text-xs px-3 py-1.5 rounded-full border border-slate-700 text-slate-300 hover:border-emerald-500/50 hover:text-emerald-300 transition">Explain the hardest concept simply</button>
+                    <button onClick={() => genQuiz()} className="text-xs px-3 py-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 transition inline-flex items-center gap-1"><ListChecks size={12} /> Test me on it</button>
                   </div>
-                ) : (
-                  <div className="flex flex-col items-center gap-3">
-                    <div className="flex flex-wrap gap-2 justify-center max-w-md">
-                      {GENERAL_SUGGESTED.map((s) => (
-                        <button key={s} onClick={() => send(s)} className="text-xs px-3 py-1.5 rounded-full border border-slate-700 text-slate-300 hover:border-emerald-500/50 hover:text-emerald-300 transition">{s}</button>
-                      ))}
+                  {effectiveScope && <p className="text-[11px] text-slate-500">Answering only from <span className="text-emerald-400">{shortName(effectiveScope)}</span></p>}
+                </div>
+              ) : (
+                /* ── First run: upload-first hero — this is the product, not a chatbot ── */
+                <div className="min-h-[60vh] flex flex-col items-center justify-center gap-5">
+                  <label
+                    onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                    onDragLeave={() => setDragOver(false)}
+                    onDrop={handleDrop}
+                    className={`w-full max-w-lg cursor-pointer rounded-2xl border-2 border-dashed p-8 text-center transition ${dragOver ? "border-emerald-400 bg-emerald-500/10" : "border-slate-700 hover:border-emerald-500/50 bg-slate-800/20"}`}
+                  >
+                    <input type="file" multiple accept=".pdf,.txt,.md,.csv,.docx,.pptx" onChange={handleUpload} className="hidden" disabled={!!busy} />
+                    <UploadCloud size={34} className="mx-auto text-emerald-400 mb-3" />
+                    <div className="text-slate-100 font-medium text-lg">Drop in your study material</div>
+                    <div className="text-sm text-slate-500 mt-1">Textbooks, notes, slides, past papers — PDF, Word, PPT, or paste a link in the sidebar</div>
+                    {busy && <div className="text-xs text-emerald-400 animate-pulse mt-3">{busy}</div>}
+                  </label>
+
+                  <div className="grid sm:grid-cols-2 gap-3 w-full max-w-lg">
+                    <div className="rounded-xl border border-slate-800 bg-slate-800/20 p-4">
+                      <div className="flex items-center gap-2 text-slate-200 font-medium text-sm"><GraduationCap size={16} className="text-emerald-400" /> I&apos;m studying</div>
+                      <p className="text-xs text-slate-500 mt-1.5">Upload your notes, then ask questions and test yourself — every answer comes from YOUR material, with sources.</p>
                     </div>
-                    <p className="text-xs text-slate-600 max-w-sm">Ask me anything — or add a document in <span className="text-emerald-400">📚 Knowledge</span> to get answers grounded in your own material.</p>
+                    <button onClick={newPaper} className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4 text-left hover:bg-emerald-500/10 transition">
+                      <div className="flex items-center gap-2 text-emerald-300 font-medium text-sm"><FileText size={16} /> I&apos;m teaching</div>
+                      <p className="text-xs text-slate-500 mt-1.5">Generate exam papers in your institute&apos;s exact format — with answer key and marking scheme. →</p>
+                    </button>
                   </div>
-                )}
-              </div>
+
+                  <p className="text-xs text-slate-600">…or just <button onClick={() => document.querySelector<HTMLTextAreaElement>("textarea")?.focus()} className="text-emerald-400 hover:underline">ask anything</button> without uploading.</p>
+                </div>
+              )
             )}
 
             {messages.map((m, i) => (
@@ -589,7 +739,17 @@ export default function Home() {
                       {m.type === "quiz" ? (
                         <>
                           <div className="text-sm text-slate-400 mb-3">{m.content}</div>
-                          {m.quiz && <QuizCard questions={m.quiz} />}
+                          {m.quiz && (
+                            <QuizCard
+                              questions={m.quiz}
+                              saved={m.quizAnswers ?? {}}
+                              savedDone={m.quizDone ?? false}
+                              onAnswer={(a) => patchMessage(i, { quizAnswers: a })}
+                              onComplete={() => patchMessage(i, { quizDone: true })}
+                              onRetry={() => patchMessage(i, { quizAnswers: {}, quizDone: false })}
+                              onPractice={(missed) => genQuiz(missed.map((q) => q.slice(0, 90)).join(" ; "))}
+                            />
+                          )}
                         </>
                       ) : (
                         <div className={MD}>
@@ -597,22 +757,20 @@ export default function Home() {
                         </div>
                       )}
 
-                      {m.type === "paper" && m.content.length > 100 && (
+                      {m.type === "paper" && m.content.length > 100 && !(streaming && i === messages.length - 1) && (
                         <div className="mt-3 flex flex-wrap gap-2 items-center">
-                          <span className="text-xs text-slate-500">Download:</span>
-                          <button onClick={() => downloadPaper(m.content, "pdf")} className="text-xs px-3 py-1.5 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/25 transition">⬇ PDF</button>
-                          <button onClick={() => downloadPaper(m.content, "docx")} className="text-xs px-3 py-1.5 rounded-lg border border-slate-700 text-slate-300 hover:border-emerald-500/50 transition">⬇ Word</button>
-                          <button onClick={() => downloadPaper(m.content, "pptx")} className="text-xs px-3 py-1.5 rounded-lg border border-slate-700 text-slate-300 hover:border-emerald-500/50 transition">⬇ PPTX</button>
+                          <span className="text-xs text-slate-500 inline-flex items-center gap-1"><Download size={12} /> Download:</span>
+                          <button onClick={() => downloadPaper(m.content, "docx")} className="text-xs px-3 py-1.5 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/25 transition">Word</button>
+                          <button onClick={() => downloadPaper(m.content, "pdf")} className="text-xs px-3 py-1.5 rounded-lg border border-slate-700 text-slate-300 hover:border-emerald-500/50 transition">PDF</button>
+                          <button onClick={() => send("Generate a Variant B of the paper above: different questions of equal difficulty, identical format, sections, and marks distribution.")} className="text-xs px-3 py-1.5 rounded-lg border border-slate-700 text-slate-300 hover:border-emerald-500/50 transition">Variant B</button>
                         </div>
                       )}
 
-                      {/* match/latency meter removed — it was a misleading metric */}
-
-                      {m.web && <div className="mt-2 text-[11px] text-sky-400">🌐 Searched the web</div>}
+                      {m.web && <div className="mt-2 text-[11px] text-sky-400 inline-flex items-center gap-1"><Globe size={11} /> Searched the web</div>}
 
                       {m.sources && m.sources.length > 0 && (
                         <details className="mt-2">
-                          <summary className="cursor-pointer text-xs text-slate-400 hover:text-slate-200 select-none">📚 {m.sources.length} source{m.sources.length > 1 ? "s" : ""}</summary>
+                          <summary className="cursor-pointer text-xs text-slate-400 hover:text-slate-200 select-none">From your material — {m.sources.length} source{m.sources.length > 1 ? "s" : ""}</summary>
                           <div className="mt-2 space-y-2">
                             {m.sources.map((s, j) => (
                               <div key={j} className="text-xs bg-slate-900/60 border border-slate-700/50 rounded-lg p-2">
@@ -638,14 +796,16 @@ export default function Home() {
               </div>
             ))}
 
-            {thinking && (
+            {(thinking || quizLoading || summaryLoading) && (
               <div className="flex justify-start">
-                <div className="rounded-2xl bg-slate-800/40 border border-slate-700/50 px-4 py-3 text-slate-400 text-sm flex items-center gap-2">
+                <div className="rounded-2xl bg-slate-800/40 border border-slate-700/50 px-4 py-3 text-slate-400 text-sm flex items-center gap-2.5">
                   <span className="inline-flex gap-1">
                     <span className="animate-bounce">●</span>
                     <span className="animate-bounce [animation-delay:0.15s]">●</span>
                     <span className="animate-bounce [animation-delay:0.3s]">●</span>
                   </span>
+                  {quizLoading && <span className="text-xs">Building your quiz from {effectiveScope ? shortName(effectiveScope) : "your material"}…</span>}
+                  {summaryLoading && <span className="text-xs">Writing study notes from {effectiveScope ? shortName(effectiveScope) : "your material"}…</span>}
                   {thinkingNote && <span className="text-xs text-amber-400/90">{thinkingNote}</span>}
                 </div>
               </div>
@@ -654,50 +814,98 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Input */}
+        {/* ── Input area ── */}
         <div className="shrink-0 border-t border-slate-800 p-3">
-          {contentReady && docs.length > 0 && (
-            <div className="max-w-3xl mx-auto mb-2 flex items-center gap-2 text-xs">
-              <span className="text-slate-500 shrink-0">🎯 Scope:</span>
-              <select value={scopeSource} onChange={(e) => setScopeSource(e.target.value)} className="min-w-0 max-w-[60%] truncate bg-slate-800/60 border border-slate-700 rounded-lg px-2 py-1 text-slate-200 outline-none focus:border-emerald-500/50">
-                <option value="">All documents</option>
+          {/* Quick study actions + scope */}
+          {contentReady && docs.length > 0 && !isPaper && (
+            <div className="max-w-3xl mx-auto mb-2 flex flex-wrap items-center gap-2 text-xs">
+              <span className="text-slate-500 shrink-0">Answering from:</span>
+              <select value={effectiveScope} onChange={(e) => setScopeSource(e.target.value)} className="min-w-0 max-w-[45%] truncate bg-slate-800/60 border border-slate-700 rounded-lg px-2 py-1 text-slate-200 outline-none focus:border-emerald-500/50" aria-label="Answering from which material">
+                <option value="">All my materials</option>
                 {docs.map((d) => (
                   <option key={d.source} value={d.source}>{d.source}</option>
                 ))}
               </select>
-              {scopeSource && <span className="text-emerald-400/80 shrink-0">answers use only this document</span>}
+              <span className="flex-1" />
+              <div className="inline-flex items-center rounded-lg border border-slate-700 overflow-hidden">
+                <button onClick={() => genQuiz()} disabled={generating} className="inline-flex items-center gap-1 px-2.5 py-1.5 text-slate-300 hover:bg-slate-800 hover:text-emerald-300 disabled:opacity-40 transition" title="Quiz yourself on your material"><ListChecks size={13} /> Test me</button>
+                <select value={quizCount} onChange={(e) => setQuizCount(Number(e.target.value))} className="bg-slate-800/60 border-l border-slate-700 px-1 py-1.5 text-slate-400 outline-none" aria-label="Number of quiz questions">
+                  <option value={5}>5</option>
+                  <option value={10}>10</option>
+                  <option value={15}>15</option>
+                </select>
+              </div>
+              <button onClick={genSummary} disabled={generating} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800 hover:text-emerald-300 disabled:opacity-40 transition" title="Structured study notes from your material"><ScrollText size={13} /> Study notes</button>
             </div>
           )}
-          {current?.kind === "paper" && examName && (
-            <div className="max-w-3xl mx-auto mb-2 flex items-center gap-2 text-xs">
-              <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-emerald-500/15 text-emerald-300 border border-emerald-500/20">
-                📎 format: {examName}
-                <button onClick={() => { setExamPattern(""); setExamName(""); }} className="hover:text-red-300" aria-label="Remove format">✕</button>
-              </span>
+
+          {/* Paper options */}
+          {isPaper && (
+            <div className="max-w-3xl mx-auto mb-2 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs">
+              {patternName ? (
+                <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-emerald-500/15 text-emerald-300 border border-emerald-500/20">
+                  <Paperclip size={11} /> {shortName(patternName, 22)}
+                  <button onClick={() => current && updateConvo(current.id, { pattern: "", patternName: "" })} className="hover:text-red-300" aria-label="Remove format"><X size={11} /></button>
+                </span>
+              ) : (
+                <span className="text-slate-600 inline-flex items-center gap-1"><Paperclip size={11} /> {patternLoading ? "Reading format…" : "no format attached"}</span>
+              )}
+              <label className="inline-flex items-center gap-1.5 text-slate-300 cursor-pointer select-none">
+                <input type="checkbox" checked={paperKey} onChange={(e) => setPaperKey(e.target.checked)} className="accent-emerald-500" />
+                Answer key
+              </label>
+              <label className="inline-flex items-center gap-1.5 text-slate-400">
+                Difficulty
+                <select value={paperDifficulty} onChange={(e) => setPaperDifficulty(e.target.value)} className="bg-slate-800/60 border border-slate-700 rounded px-1.5 py-1 text-slate-200 outline-none">
+                  <option value="">Balanced</option>
+                  <option value="mostly easy">Easy</option>
+                  <option value="mostly medium">Medium</option>
+                  <option value="mostly hard, challenging">Hard</option>
+                </select>
+              </label>
+              <label className="inline-flex items-center gap-1.5 text-slate-400">
+                Marks
+                <input value={paperMarks} onChange={(e) => setPaperMarks(e.target.value)} placeholder="e.g. 50" className="w-16 bg-slate-800/60 border border-slate-700 rounded px-1.5 py-1 text-slate-200 outline-none placeholder:text-slate-600" />
+              </label>
+              {contentReady && docs.length > 0 && (
+                <select value={effectiveScope} onChange={(e) => setScopeSource(e.target.value)} className="bg-slate-800/60 border border-slate-700 rounded px-1.5 py-1 text-slate-200 outline-none max-w-[40%] truncate" aria-label="Source material">
+                  <option value="">From: all materials</option>
+                  {docs.map((d) => (
+                    <option key={d.source} value={d.source}>From: {d.source}</option>
+                  ))}
+                </select>
+              )}
             </div>
           )}
+
           <div className="max-w-3xl mx-auto flex items-end gap-2">
-            {current?.kind === "paper" && (
-              <label title="Attach a format / pattern sample" className={`h-11 w-11 shrink-0 grid place-items-center rounded-xl border cursor-pointer transition ${examName ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-300" : "bg-slate-800/60 border-slate-700 text-slate-300 hover:border-emerald-500/50"}`}>
+            {isPaper && (
+              <label title="Attach a format / past-paper sample" className={`h-11 w-11 shrink-0 grid place-items-center rounded-xl border cursor-pointer transition ${patternName ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-300" : "bg-slate-800/60 border-slate-700 text-slate-300 hover:border-emerald-500/50"}`}>
                 <input type="file" accept=".pdf,.txt,.md,.csv,.docx,.pptx" onChange={handlePatternUpload} className="hidden" />
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a5 5 0 0 1-7.07-7.07l9.19-9.19a3.5 3.5 0 0 1 4.95 4.95l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" /></svg>
+                <Paperclip size={17} />
               </label>
             )}
             <button onClick={toggleVoice} disabled={connected === false} title="Voice to text (Chrome/Edge)" className={`h-11 w-11 shrink-0 grid place-items-center rounded-xl border transition disabled:opacity-40 ${listening ? "bg-red-500/20 border-red-500/50 text-red-300 animate-pulse" : "bg-slate-800/60 border-slate-700 text-slate-300 hover:border-emerald-500/50"}`} aria-label="Voice input">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z" /><path d="M19 10v1a7 7 0 0 1-14 0v-1" /><line x1="12" y1="18" x2="12" y2="22" /></svg>
+              <Mic size={17} />
             </button>
             <textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(input); } }}
-              placeholder={listening ? "Listening…" : contentReady ? "Ask about your material…" : "Ask me anything…"}
+              placeholder={listening ? "Listening…" : isPaper ? "Describe the paper — e.g. '50-mark paper from chapter 3, Q1 scenario-based'" : contentReady ? "Ask about your material…" : "Ask me anything…"}
               disabled={connected === false}
               rows={1}
               className="flex-1 resize-none rounded-xl bg-slate-800/60 border border-slate-700 focus:border-emerald-500/60 outline-none px-4 py-3 text-[15px] placeholder:text-slate-600 disabled:opacity-50 max-h-40"
             />
-            <button onClick={() => send(input)} disabled={connected === false || thinking || !input.trim()} className="h-11 w-11 shrink-0 grid place-items-center rounded-xl bg-emerald-500 text-slate-950 hover:bg-emerald-400 disabled:opacity-40 disabled:hover:bg-emerald-500 transition" aria-label="Send">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 19V5M5 12l7-7 7 7" /></svg>
-            </button>
+            {streaming ? (
+              <button onClick={stopStreaming} className="h-11 w-11 shrink-0 grid place-items-center rounded-xl bg-slate-700 text-slate-200 hover:bg-slate-600 transition" aria-label="Stop generating">
+                <Square size={15} fill="currentColor" />
+              </button>
+            ) : (
+              <button onClick={() => send(input)} disabled={connected === false || generating || !input.trim()} className="h-11 w-11 shrink-0 grid place-items-center rounded-xl bg-emerald-500 text-slate-950 hover:bg-emerald-400 disabled:opacity-40 disabled:hover:bg-emerald-500 transition" aria-label="Send">
+                <ArrowUp size={18} strokeWidth={2.5} />
+              </button>
+            )}
           </div>
         </div>
       </div>

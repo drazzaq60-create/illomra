@@ -2,6 +2,12 @@
 // Every function here maps to one endpoint in backend/api.py.
 
 const BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+// Optional shared access token for deployed instances (matches backend APP_ACCESS_TOKEN).
+const TOKEN = process.env.NEXT_PUBLIC_API_TOKEN || "";
+
+function authHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  return TOKEN ? { ...extra, Authorization: `Bearer ${TOKEN}` } : extra;
+}
 
 export type Source = { content: string; source: string; page: string | number };
 
@@ -11,16 +17,6 @@ export type Usage = {
   context_window: number;
   session_input: number;
   session_output: number;
-};
-
-export type ChatResult = {
-  answer: string;
-  sources: Source[];
-  latency_ms: number;
-  confidence: number;
-  usage?: Usage;
-  web_used?: boolean;
-  cost?: string;
 };
 
 export type Stats = { documents: number; chunks: number };
@@ -34,8 +30,21 @@ export type QuizQuestion = {
   explanation?: string;
 };
 
+export type StreamMeta = {
+  sources?: Source[];
+  confidence?: number;
+  latency_ms?: number;
+  web_used?: boolean;
+  usage?: Usage;
+  cost?: string;
+  error?: string;
+};
+
 async function req(path: string, options?: RequestInit) {
-  const res = await fetch(`${BASE}${path}`, options);
+  const res = await fetch(`${BASE}${path}`, {
+    ...options,
+    headers: authHeaders((options?.headers as Record<string, string>) || {}),
+  });
   if (!res.ok) {
     let detail = res.statusText;
     try {
@@ -50,7 +59,7 @@ async function req(path: string, options?: RequestInit) {
 }
 
 export const api = {
-  health: (): Promise<{ status: string; key_loaded: boolean; models: string[] }> =>
+  health: (): Promise<{ status: string; documents?: number; chunks?: number }> =>
     req("/health"),
 
   upload: (file: File): Promise<{ filename: string; chunks: number; stats: Stats }> => {
@@ -58,13 +67,6 @@ export const api = {
     form.append("file", file);
     return req("/upload", { method: "POST", body: form });
   },
-
-  youtube: (url: string): Promise<{ chunks: number; stats: Stats }> =>
-    req("/youtube", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url }),
-    }),
 
   // Smart: sends any link; backend routes YouTube -> transcript, else -> web page.
   link: (url: string): Promise<{ chunks: number; stats: Stats }> =>
@@ -74,26 +76,22 @@ export const api = {
       body: JSON.stringify({ url }),
     }),
 
-  chat: (question: string, history: { role: string; content: string }[] = [], pattern = "", source = ""): Promise<ChatResult> =>
-    req("/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question, history, pattern, source }),
-    }),
-
   chatStream: async (
-    question: string,
-    history: { role: string; content: string }[],
-    pattern: string,
-    source: string,
-    onToken: (t: string) => void,
-    onNotice: (n: string) => void,
-    onDone: (meta: { sources?: Source[]; confidence?: number; latency_ms?: number; web_used?: boolean; usage?: Usage; cost?: string; error?: string }) => void,
+    params: { question: string; history: { role: string; content: string }[]; pattern: string; source: string; paperOpts: string },
+    handlers: { onToken: (t: string) => void; onNotice: (n: string) => void; onDone: (meta: StreamMeta) => void },
+    signal?: AbortSignal,
   ): Promise<void> => {
     const res = await fetch(`${BASE}/chat-stream`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question, history, pattern, source }),
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({
+        question: params.question,
+        history: params.history,
+        pattern: params.pattern,
+        source: params.source,
+        paper_opts: params.paperOpts,
+      }),
+      signal,
     });
     if (!res.ok) {
       let detail = "Stream failed";
@@ -120,9 +118,9 @@ export const api = {
         if (!line) continue;
         try {
           const obj = JSON.parse(line);
-          if (obj.token) onToken(obj.token as string);
-          if (obj.notice) onNotice(obj.notice as string);
-          if (obj.done) onDone(obj);
+          if (obj.token) handlers.onToken(obj.token as string);
+          if (obj.notice) handlers.onNotice(obj.notice as string);
+          if (obj.done) handlers.onDone(obj);
         } catch {
           // ignore a partial/bad line
         }
@@ -130,11 +128,11 @@ export const api = {
     }
   },
 
-  quiz: (num_questions: number, source = ""): Promise<{ questions: QuizQuestion[] }> =>
+  quiz: (num_questions: number, source = "", topic = ""): Promise<{ questions: QuizQuestion[] }> =>
     req("/quiz", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ num_questions, source }),
+      body: JSON.stringify({ num_questions, source, topic }),
     }),
 
   summary: (source = ""): Promise<{ summary: string }> =>
@@ -163,20 +161,22 @@ export const api = {
     return req("/extract", { method: "POST", body: form });
   },
 
-  exam: (pattern_text: string, instructions: string, reference_text = "", reference_url = ""): Promise<{ paper: string }> =>
-    req("/exam", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ pattern_text, instructions, reference_text, reference_url }),
-    }),
-
   exportPaper: async (text: string, format: string): Promise<void> => {
     const res = await fetch(`${BASE}/export`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ text, format }),
     });
-    if (!res.ok) throw new Error("Export failed");
+    if (!res.ok) {
+      let detail = "Export failed";
+      try {
+        const data = await res.json();
+        detail = data.detail || detail;
+      } catch {
+        // keep default
+      }
+      throw new Error(detail);
+    }
     const blob = await res.blob();
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
