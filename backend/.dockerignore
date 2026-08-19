@@ -5,3 +5,4 @@ __pycache__/
 .pytest_cache/
 tests/
 usage_state.json
+pattern_files/

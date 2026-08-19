@@ -523,14 +523,24 @@ class RAGEngine:
             log.exception("Image re-encode failed — sending original bytes")
             return data, "image/jpeg"
 
-    def image_to_text(self, data: bytes) -> str:
+    LAYOUT_PROMPT_SUFFIX = (
+        "\n\nAfter the transcription, on its own line output exactly this marker and a "
+        "single-line JSON object:\n===LAYOUT===\n"
+        '{"font": "serif" or "sans", "center_top_lines": <how many of the FIRST transcription '
+        'lines form a center-aligned title/header block>, "footer": "<any footer text, or empty>"}'
+    )
+
+    def image_to_text(self, data: bytes, with_layout: bool = False):
         """Read a photo (notes page, textbook page, past paper) into text using
-        Gemini vision through the fallback chain. Costs one request."""
+        Gemini vision through the fallback chain. Costs one request.
+        With with_layout=True, also extracts a visual layout spec (font family,
+        centered header block, footer) and returns (text, layout_dict)."""
         import base64
         img_bytes, mime = self._prep_image(data)
         b64 = base64.b64encode(img_bytes).decode("ascii")
+        prompt = self.TRANSCRIBE_PROMPT + (self.LAYOUT_PROMPT_SUFFIX if with_layout else "")
         content = [
-            {"type": "text", "text": self.TRANSCRIBE_PROMPT},
+            {"type": "text", "text": prompt},
             {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
         ]
         response = self._invoke_llm(content, max_tokens=8000)
@@ -540,7 +550,26 @@ class RAGEngine:
         text = self._content_text(getattr(response, "content", response)).strip()
         if not text:
             raise Exception("Couldn't read any text from that photo — try a clearer, closer shot.")
-        return text
+        if not with_layout:
+            return text
+        layout: Dict[str, Any] = {}
+        if "===LAYOUT===" in text:
+            body, _, spec = text.partition("===LAYOUT===")
+            text = body.strip()
+            try:
+                import json as _json
+                raw = spec.strip()
+                start, end = raw.find("{"), raw.rfind("}")
+                if start >= 0 and end > start:
+                    parsed = _json.loads(raw[start:end + 1])
+                    layout = {
+                        "font": "serif" if str(parsed.get("font", "")).lower() == "serif" else "sans",
+                        "center_top_lines": max(0, min(12, int(parsed.get("center_top_lines", 0) or 0))),
+                        "footer": str(parsed.get("footer", ""))[:200],
+                    }
+            except Exception:
+                log.exception("Could not parse layout spec from vision output")
+        return text, layout
 
     def process_file(self, uploaded_file) -> int:
         ext = "." + uploaded_file.name.split(".")[-1].lower()

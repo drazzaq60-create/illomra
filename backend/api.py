@@ -48,6 +48,15 @@ log = logging.getLogger("studymind")
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20 MB
 UPLOAD_TOO_BIG = "File is over 20 MB — split it or upload a smaller file."
 
+# Uploaded .docx format samples are kept here so /export can clone the ORIGINAL
+# file (real header/footer/fonts/margins) instead of generating a generic one.
+# On a hosted box point this at the persistent volume (e.g. /data/pattern_files).
+PATTERN_DIR = os.getenv(
+    "PATTERN_DIR",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "pattern_files"),
+)
+os.makedirs(PATTERN_DIR, exist_ok=True)
+
 # If set (non-empty), every endpoint except /health requires
 # "Authorization: Bearer <token>". Unset = local dev, no auth.
 APP_ACCESS_TOKEN = os.getenv("APP_ACCESS_TOKEN", "").strip()
@@ -209,6 +218,8 @@ class UrlIn(BaseModel):
 class ExportIn(BaseModel):
     text: str
     format: str = "pdf"
+    pattern_id: str = ""  # id of a stored .docx sample — export clones that file
+    layout: dict = {}     # visual spec from a photo sample: font / centered header / footer
 
 
 # A tiny adapter so the engine's process_file (built for Streamlit uploads)
@@ -222,11 +233,52 @@ class _UploadShim:
         return self._data
 
 
-def _paper_to_bytes(text: str, fmt: str):
-    """Convert a markdown paper into pdf / docx / pptx bytes."""
+def _fill_docx(doc, text: str, layout: dict, center_rest: bool = False):
+    """Write the markdown-lite paper text into a python-docx Document."""
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    center_n = int((layout or {}).get("center_top_lines", 0) or 0)
+    line_no = 0
+    for raw in text.split("\n"):
+        st = raw.strip()
+        if not st:
+            doc.add_paragraph("")
+            continue
+        line_no += 1
+        if st.startswith("### "):
+            p = doc.add_heading(st[4:], level=3)
+        elif st.startswith("## "):
+            p = doc.add_heading(st[3:], level=2)
+        elif st.startswith("# "):
+            p = doc.add_heading(st[2:], level=1)
+        elif st.startswith(("- ", "* ")):
+            p = doc.add_paragraph(st[2:].replace("**", ""), style="List Bullet")
+        else:
+            p = doc.add_paragraph(st.replace("**", ""))
+        # The sample's opening title/institute block was center-aligned — mirror it.
+        if line_no <= center_n or center_rest:
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            if line_no <= center_n:
+                for run in p.runs:
+                    run.bold = True
+
+
+def _paper_to_bytes(text: str, fmt: str, layout: dict = None, pattern_path: str = None):
+    """Convert a markdown paper into pdf / docx / pptx bytes.
+    - pattern_path (a stored .docx sample): the export CLONES that file — its real
+      header, footer, margins, page setup, and fonts are preserved exactly.
+    - layout (from a photo sample): styles the generic export — serif font,
+      centered title block, footer text."""
+    layout = layout or {}
     if fmt == "pdf":
-        # fpdf's core fonts are latin-1 only. Refuse loudly instead of silently
-        # stripping Urdu/special characters out of the exported paper.
+        # fpdf's core fonts are latin-1 only. Normalize common typography the
+        # model produces (em-dashes, smart quotes) to ASCII equivalents first;
+        # refuse loudly ONLY for genuinely unmappable text (e.g. Urdu) instead
+        # of silently stripping it out of the exported paper.
+        text = text.translate(str.maketrans({
+            "—": "-", "–": "-", "‘": "'", "’": "'",
+            "“": '"', "”": '"', "…": "...", " ": " ",
+            "•": "-", "→": "->", "×": "x", "−": "-",
+        }))
         try:
             text.encode("latin-1")
         except UnicodeEncodeError:
@@ -234,49 +286,72 @@ def _paper_to_bytes(text: str, fmt: str):
                              "download as Word instead (full support).")
         from fpdf import FPDF
         from fpdf.enums import XPos, YPos
-        safe = text
-        pdf = FPDF()
+
+        family = "Times" if layout.get("font") == "serif" else "Helvetica"
+        footer_text = str(layout.get("footer", "") or "")
+
+        class PaperPDF(FPDF):
+            def footer(self):
+                self.set_y(-13)
+                self.set_font(family, "I", 9)
+                left = footer_text[:80]
+                self.cell(self.epw / 2, 6, left, align="L")
+                self.cell(self.epw / 2, 6, f"Page {self.page_no()}", align="R")
+
+        pdf = PaperPDF()
         pdf.add_page()
-        pdf.set_auto_page_break(auto=True, margin=15)
+        pdf.set_auto_page_break(auto=True, margin=18)
+        center_n = int(layout.get("center_top_lines", 0) or 0)
+        line_no = 0
 
-        def _line(t, size, style=""):
-            pdf.set_font("Helvetica", style, size)
+        def _line(t, size, style="", align="L"):
+            pdf.set_font(family, style, size)
             pdf.set_x(pdf.l_margin)
-            pdf.multi_cell(pdf.epw, size * 0.55, t, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.multi_cell(pdf.epw, size * 0.55, t, align=align,
+                           new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
-        for raw in safe.split("\n"):
+        for raw in text.split("\n"):
             st = raw.strip()
-            if st.startswith("### "):
-                _line(st[4:], 12, "B")
-            elif st.startswith("## "):
-                _line(st[3:], 14, "B")
-            elif st.startswith("# "):
-                _line(st[2:], 16, "B")
-            elif st.startswith(("- ", "* ")):
-                _line("  - " + st[2:].replace("**", ""), 11)
-            elif st:
-                _line(st.replace("**", ""), 11)
-            else:
+            if not st:
                 pdf.ln(3)
+                continue
+            line_no += 1
+            centered = "C" if line_no <= center_n else "L"
+            if st.startswith("### "):
+                _line(st[4:], 12, "B", centered)
+            elif st.startswith("## "):
+                _line(st[3:], 14, "B", centered)
+            elif st.startswith("# "):
+                _line(st[2:], 16, "B", centered)
+            elif st.startswith(("- ", "* ")):
+                _line("  - " + st[2:].replace("**", ""), 11, "", centered)
+            else:
+                _line(st.replace("**", ""), 11, "B" if line_no <= center_n else "", centered)
         return bytes(pdf.output()), "application/pdf", "pdf"
     if fmt == "docx":
         import io
         from docx import Document as Docx
-        doc = Docx()
-        for raw in text.split("\n"):
-            st = raw.strip()
-            if st.startswith("### "):
-                doc.add_heading(st[4:], level=3)
-            elif st.startswith("## "):
-                doc.add_heading(st[3:], level=2)
-            elif st.startswith("# "):
-                doc.add_heading(st[2:], level=1)
-            elif st.startswith(("- ", "* ")):
-                doc.add_paragraph(st[2:].replace("**", ""), style="List Bullet")
-            elif st:
-                doc.add_paragraph(st.replace("**", ""))
-            else:
-                doc.add_paragraph("")
+        if pattern_path and os.path.exists(pattern_path):
+            # EXACT-format path: clone the teacher's own sample file. Its header,
+            # footer, margins, styles, and fonts stay untouched — we only replace
+            # the body content with the new paper.
+            doc = Docx(pattern_path)
+            for tbl in list(doc.tables):
+                tbl._element.getparent().remove(tbl._element)
+            for p in list(doc.paragraphs):
+                p._element.getparent().remove(p._element)
+            _fill_docx(doc, text, layout)
+        else:
+            doc = Docx()
+            if layout.get("font") == "serif":
+                doc.styles["Normal"].font.name = "Times New Roman"
+            _fill_docx(doc, text, layout)
+            footer_text = str(layout.get("footer", "") or "")
+            if footer_text:
+                try:
+                    doc.sections[0].footer.paragraphs[0].text = footer_text[:200]
+                except Exception:
+                    log.exception("Could not write docx footer")
         buf = io.BytesIO(); doc.save(buf)
         return buf.getvalue(), "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "docx"
     if fmt == "pptx":
@@ -423,8 +498,12 @@ def delete_document(body: DeleteDocIn):
 
 @router.post("/extract")
 async def extract(file: UploadFile = File(...)):
-    """Extract plain text from an uploaded sample/pattern paper (not indexed as content).
-    Photos are transcribed by Gemini vision (costs one request)."""
+    """Extract text from an uploaded sample/pattern paper (not indexed as content).
+    - Photos: Gemini vision transcribes AND reads the visual layout (font,
+      centered header block, footer) so exports can mirror the look.
+    - .docx samples: the raw file is also stored, so /export can clone it for an
+      EXACT-format paper (real header/footer/fonts preserved)."""
+    import hashlib
     import tempfile
     data = await file.read()
     if len(data) > MAX_UPLOAD_BYTES:
@@ -432,10 +511,19 @@ async def extract(file: UploadFile = File(...)):
     ext = "." + (file.filename or "x.txt").split(".")[-1].lower()
     if ext in RAGEngine.IMAGE_EXTS:
         try:
-            text = get_engine().image_to_text(data)
+            text, layout = get_engine().image_to_text(data, with_layout=True)
         except Exception as e:
             raise _ai_http_error(e)
-        return {"text": text[:15000]}
+        return {"text": text[:15000], "layout": layout}
+    pattern_id = ""
+    if ext == ".docx":
+        pattern_id = hashlib.sha256(data).hexdigest()[:16]
+        try:
+            with open(os.path.join(PATTERN_DIR, f"{pattern_id}.docx"), "wb") as f:
+                f.write(data)
+        except Exception:
+            log.exception("Could not store pattern file")
+            pattern_id = ""
     with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
         tmp.write(data)
         path = tmp.name
@@ -448,13 +536,20 @@ async def extract(file: UploadFile = File(...)):
                             detail="Couldn't read that file — supported: PDF, Word, PPT, TXT, MD, CSV, or a photo.")
     finally:
         os.unlink(path)
-    return {"text": text[:15000]}
+    return {"text": text[:15000], "pattern_id": pattern_id}
 
 
 @router.post("/export")
 def export(body: ExportIn):
+    import re as _re
+    pattern_path = None
+    if body.pattern_id and _re.fullmatch(r"[0-9a-f]{16}", body.pattern_id):
+        candidate = os.path.join(PATTERN_DIR, f"{body.pattern_id}.docx")
+        if os.path.exists(candidate):
+            pattern_path = candidate
     try:
-        data, mime, ext = _paper_to_bytes(body.text, body.format)
+        data, mime, ext = _paper_to_bytes(body.text, body.format,
+                                          layout=body.layout, pattern_path=pattern_path)
     except ValueError as e:
         # Our own messages (Urdu/PDF limitation, unsupported format) — safe to show.
         raise HTTPException(status_code=400, detail=str(e))

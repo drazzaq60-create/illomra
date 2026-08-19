@@ -55,6 +55,13 @@ export type QuotaSnapshot = {
   totals: { used_today: number; capacity: number; resets_in_s: number };
 };
 
+// Visual spec of an attached format sample (from a photo) — applied at export.
+export type PaperLayout = {
+  font?: string;             // "serif" | "sans"
+  center_top_lines?: number; // how many opening lines are a centered title block
+  footer?: string;
+};
+
 async function req(path: string, options?: RequestInit) {
   const res = await fetch(`${BASE}${path}`, {
     ...options,
@@ -172,17 +179,17 @@ export const api = {
 
   reset: (): Promise<{ status: string }> => req("/reset", { method: "POST" }),
 
-  extract: (file: File): Promise<{ text: string }> => {
+  extract: (file: File): Promise<{ text: string; pattern_id?: string; layout?: PaperLayout }> => {
     const form = new FormData();
     form.append("file", file);
     return req("/extract", { method: "POST", body: form });
   },
 
-  exportPaper: async (text: string, format: string): Promise<void> => {
+  exportPaper: async (text: string, format: string, patternId = "", layout: PaperLayout | undefined = undefined): Promise<void> => {
     const res = await fetch(`${BASE}/export`, {
       method: "POST",
       headers: authHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ text, format }),
+      body: JSON.stringify({ text, format, pattern_id: patternId, layout: layout ?? {} }),
     });
     if (!res.ok) {
       let detail = "Export failed";

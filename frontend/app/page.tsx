@@ -8,7 +8,7 @@ import {
   Paperclip, Mic, ArrowUp, Square, Menu, Globe, Download, ListChecks, ScrollText,
   UploadCloud, X, RotateCcw, FileDown,
 } from "lucide-react";
-import { api, type QuizQuestion, type Source, type Usage, type Stats, type Doc, type QuotaSnapshot } from "@/lib/api";
+import { api, type QuizQuestion, type Source, type Usage, type Stats, type Doc, type QuotaSnapshot, type PaperLayout } from "@/lib/api";
 
 type Msg = {
   role: "user" | "assistant";
@@ -30,8 +30,10 @@ type Convo = {
   messages: Msg[];
   pinned?: boolean;
   kind?: "chat" | "paper";
-  pattern?: string;     // attached format sample (paper conversations)
+  pattern?: string;       // attached format sample text (paper conversations)
   patternName?: string;
+  patternId?: string;     // stored .docx sample — export clones the real file
+  patternLayout?: PaperLayout; // visual spec from a photo sample
 };
 
 const MD =
@@ -506,7 +508,7 @@ export default function Home() {
     setPatternLoading(true);
     try {
       const res = await api.extract(file);
-      updateConvo(current.id, { pattern: res.text || "", patternName: file.name });
+      updateConvo(current.id, { pattern: res.text || "", patternName: file.name, patternId: res.pattern_id || "", patternLayout: res.layout });
     } catch (err) {
       flashError(err instanceof Error ? err.message : "Could not read that paper");
     } finally {
@@ -517,7 +519,7 @@ export default function Home() {
 
   async function downloadPaper(text: string, fmt: string) {
     try {
-      await api.exportPaper(text, fmt);
+      await api.exportPaper(text, fmt, current?.patternId || "", current?.patternLayout);
     } catch (err) {
       flashError(err instanceof Error ? err.message : "Download failed — is the backend running?");
     }
@@ -891,9 +893,11 @@ export default function Home() {
           {isPaper && (
             <div className="max-w-3xl mx-auto mb-2 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs">
               {patternName ? (
-                <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-emerald-500/15 text-emerald-300 border border-emerald-500/20">
+                <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-emerald-500/15 text-emerald-300 border border-emerald-500/20" title={current?.patternId ? "Word sample — exports clone your file's exact header, footer and fonts" : current?.patternLayout ? "Photo sample — exports mirror its fonts and layout" : "Format sample attached"}>
                   <Paperclip size={11} /> {shortName(patternName, 22)}
-                  <button onClick={() => current && updateConvo(current.id, { pattern: "", patternName: "" })} className="hover:text-red-300" aria-label="Remove format"><X size={11} /></button>
+                  {current?.patternId && <span className="text-[9px] uppercase tracking-wide text-emerald-400/80">exact</span>}
+                  {!current?.patternId && current?.patternLayout && <span className="text-[9px] uppercase tracking-wide text-emerald-400/80">styled</span>}
+                  <button onClick={() => current && updateConvo(current.id, { pattern: "", patternName: "", patternId: "", patternLayout: undefined })} className="hover:text-red-300" aria-label="Remove format"><X size={11} /></button>
                 </span>
               ) : (
                 <span className="text-slate-600 inline-flex items-center gap-1"><Paperclip size={11} /> {patternLoading ? "Reading format…" : "no format attached"}</span>

@@ -18,3 +18,4 @@ out/
 .env.local
 .env*.local
 usage_state.json
+backend/pattern_files/
