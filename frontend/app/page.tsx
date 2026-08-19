@@ -39,6 +39,29 @@ type Convo = {
 
 type NavSpace = "learn" | "papers" | "library";
 
+// Each space has its own identity color so users always know where they are.
+// Full literal class strings (Tailwind JIT needs them spelled out).
+const ACCENT: Record<NavSpace, {
+  solid: string; solidHover: string; text: string; soft: string; softBorder: string;
+  panelTint: string; ring: string;
+}> = {
+  learn: {
+    solid: "bg-indigo-600", solidHover: "hover:bg-indigo-500", text: "text-indigo-600",
+    soft: "bg-indigo-50", softBorder: "border-indigo-200", panelTint: "bg-indigo-50/50",
+    ring: "shadow-indigo-200",
+  },
+  papers: {
+    solid: "bg-violet-600", solidHover: "hover:bg-violet-500", text: "text-violet-600",
+    soft: "bg-violet-50", softBorder: "border-violet-200", panelTint: "bg-violet-50/50",
+    ring: "shadow-violet-200",
+  },
+  library: {
+    solid: "bg-emerald-600", solidHover: "hover:bg-emerald-500", text: "text-emerald-600",
+    soft: "bg-emerald-50", softBorder: "border-emerald-200", panelTint: "bg-emerald-50/50",
+    ring: "shadow-emerald-200",
+  },
+};
+
 const MD =
   "text-[15px] leading-relaxed text-gray-800 [&_h1]:text-lg [&_h1]:font-semibold [&_h1]:mt-3 [&_h1]:text-gray-900 [&_h2]:text-base [&_h2]:font-semibold [&_h2]:mt-3 [&_h2]:text-gray-900 [&_h3]:font-medium [&_h3]:mt-3 [&_h3]:text-gray-900 [&_p]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_ol]:my-2 [&_li]:my-1 [&_strong]:font-semibold [&_strong]:text-gray-900 [&_code]:bg-indigo-50 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-indigo-700 [&_hr]:border-gray-200 [&_hr]:my-3 [&_a]:text-indigo-600 [&_a]:underline";
 
@@ -708,24 +731,30 @@ export default function Home() {
     </div>
   );
 
-  const railBtn = (space: NavSpace, icon: React.ReactNode, label: string) => (
-    <button
-      onClick={() => { setNav(space); setSidebarOpen(true); }}
-      title={label}
-      aria-label={label}
-      className={`relative h-11 w-11 grid place-items-center rounded-xl transition ${nav === space ? "bg-indigo-600 text-white shadow-md shadow-indigo-200" : "text-gray-400 hover:bg-gray-100 hover:text-indigo-600"}`}
-    >
-      {icon}
-    </button>
-  );
+  // Labeled rail items — icon-only navigation was unreadable for new users.
+  const railBtn = (space: NavSpace, icon: React.ReactNode, label: string, hint: string) => {
+    const a = ACCENT[space];
+    const active = nav === space;
+    return (
+      <button
+        onClick={() => { setNav(space); setSidebarOpen(true); }}
+        title={hint}
+        aria-label={hint}
+        className={`w-[64px] flex flex-col items-center gap-1 py-2 rounded-xl transition ${active ? `${a.solid} text-white shadow-md ${a.ring}` : "text-gray-400 hover:bg-gray-100 hover:text-gray-700"}`}
+      >
+        {icon}
+        <span className={`text-[10px] font-medium leading-none ${active ? "text-white" : ""}`}>{label}</span>
+      </button>
+    );
+  };
 
   /* ── A4 sheet preview (Paper Studio right pane) ── */
   const sheet = previewMsg && (
     <div className="h-full flex flex-col bg-gray-100/80">
-      <div className="shrink-0 flex items-center justify-between px-4 py-2.5 border-b border-gray-200 bg-white">
-        <span className="text-xs font-medium text-gray-500 inline-flex items-center gap-1.5"><Eye size={13} /> Paper preview</span>
+      <div className="shrink-0 flex items-center justify-between px-4 py-2.5 border-b border-violet-100 bg-violet-50/60">
+        <span className="text-xs font-medium text-violet-600 inline-flex items-center gap-1.5"><Eye size={13} /> Paper preview</span>
         <div className="flex items-center gap-2">
-          <button onClick={() => downloadPaper(previewMsg.content, "docx")} className="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-500 transition font-medium inline-flex items-center gap-1"><Download size={12} /> Word</button>
+          <button onClick={() => downloadPaper(previewMsg.content, "docx")} className="text-xs px-3 py-1.5 rounded-lg bg-violet-600 text-white hover:bg-violet-500 transition font-medium inline-flex items-center gap-1"><Download size={12} /> Word</button>
           <button onClick={() => downloadPaper(previewMsg.content, "pdf")} className="text-xs px-3 py-1.5 rounded-lg border border-gray-300 text-gray-600 hover:border-indigo-400 hover:text-indigo-700 transition">PDF</button>
           <button onClick={() => send("Generate a Variant B of the paper above: different questions of equal difficulty, identical format, sections, and marks distribution.")} disabled={generating} className="text-xs px-3 py-1.5 rounded-lg border border-gray-300 text-gray-600 hover:border-indigo-400 hover:text-indigo-700 disabled:opacity-40 transition">Variant B</button>
         </div>
@@ -742,10 +771,10 @@ export default function Home() {
   );
 
   return (
-    <div className="h-dvh flex bg-[#f7f7f5] text-gray-800">
+    <div className="h-dvh flex bg-transparent text-gray-800">
       {/* ── Lock screen (deployed instances with APP_ACCESS_TOKEN) ── */}
       {locked && (
-        <div className="fixed inset-0 z-50 bg-[#f7f7f5] flex items-center justify-center p-6">
+        <div className="fixed inset-0 z-50 bg-gradient-to-br from-indigo-50 via-white to-violet-50 flex items-center justify-center p-6">
           <div className="w-full max-w-sm bg-white rounded-2xl border border-gray-200 shadow-lg p-8 text-center">
             <div className="flex justify-center mb-3"><Logo size={48} /></div>
             <div className="text-xl font-semibold text-gray-900">Illomra</div>
@@ -770,20 +799,21 @@ export default function Home() {
         </div>
       )}
 
-      {/* ── Icon rail ── */}
-      <nav className="w-[60px] shrink-0 flex flex-col items-center border-r border-gray-200 bg-white py-3 gap-1 z-40">
-        <div className="mb-2"><Logo size={34} /></div>
-        {railBtn("learn", <GraduationCap size={19} />, "Learn — chat with your material")}
-        {railBtn("papers", <FileText size={19} />, "Paper Studio — generate exam papers")}
-        {railBtn("library", <BookOpen size={19} />, "Library — your materials")}
+      {/* ── Labeled rail ── */}
+      <nav className="w-[76px] shrink-0 flex flex-col items-center border-r border-gray-200 bg-white py-3 gap-1.5 z-40">
+        <div className="mb-2"><Logo size={36} /></div>
+        {railBtn("learn", <GraduationCap size={19} />, "Learn", "Learn — chat with your material")}
+        {railBtn("papers", <FileText size={19} />, "Papers", "Paper Studio — generate exam papers")}
+        {railBtn("library", <BookOpen size={19} />, "Library", "Library — your materials")}
         <div className="flex-1" />
         {quota && (
-          <button onClick={() => { setNav("library"); setSidebarOpen(true); }} title={`AI limit: ≈${quota.totals.used_today}/${quota.totals.capacity} today`} className="mb-1">
+          <button onClick={() => { setNav("library"); setSidebarOpen(true); }} title={`AI limit: ≈${quota.totals.used_today}/${quota.totals.capacity} today`} className="mb-0.5 flex flex-col items-center gap-0.5">
             <svg width="26" height="26" viewBox="0 0 36 36">
               <circle cx="18" cy="18" r="15" fill="none" stroke="#e5e7eb" strokeWidth="4" />
               <circle cx="18" cy="18" r="15" fill="none" stroke={quotaPct >= 90 ? "#ef4444" : quotaPct >= 65 ? "#f59e0b" : "#6366f1"} strokeWidth="4"
                 strokeDasharray={`${(quotaPct / 100) * 94.2} 94.2`} strokeLinecap="round" transform="rotate(-90 18 18)" />
             </svg>
+            <span className="text-[9px] text-gray-400 leading-none">limit</span>
           </button>
         )}
         <button onClick={exportChats} title="Export all chats (JSON)" aria-label="Export chats" className="h-9 w-9 grid place-items-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-indigo-600 transition"><FileDown size={16} /></button>
@@ -793,10 +823,10 @@ export default function Home() {
       <aside className={`${sidebarOpen ? "flex" : "hidden"} md:flex w-[258px] shrink-0 flex-col border-r border-gray-200 bg-white fixed md:static left-[60px] z-30 h-full`}>
         {nav === "library" ? (
           <>
-            <div className="p-3 pb-2 flex items-center justify-between">
+            <div className={`p-3 flex items-center justify-between border-b ${ACCENT.library.softBorder} ${ACCENT.library.panelTint}`}>
               <div>
-                <div className="font-semibold text-gray-900 text-[15px]">Library</div>
-                <div className="text-[11px] text-gray-400">Everything Illomra answers from</div>
+                <div className={`font-semibold text-[15px] ${ACCENT.library.text} inline-flex items-center gap-1.5`}><BookOpen size={14} /> Library</div>
+                <div className="text-[11px] text-gray-500">Everything Illomra answers from</div>
               </div>
             </div>
             <div className="px-3 space-y-2">
@@ -832,13 +862,16 @@ export default function Home() {
           </>
         ) : (
           <>
-            <div className="p-3 pb-2 flex items-center justify-between">
+            <div className={`p-3 flex items-center justify-between border-b ${nav === "papers" ? `${ACCENT.papers.softBorder} ${ACCENT.papers.panelTint}` : `${ACCENT.learn.softBorder} ${ACCENT.learn.panelTint}`}`}>
               <div>
-                <div className="font-semibold text-gray-900 text-[15px]">{nav === "papers" ? "Paper Studio" : "Learn"}</div>
-                <div className="text-[11px] text-gray-400">{nav === "papers" ? "Exam papers in your format" : "Chat with your material"}</div>
+                <div className={`font-semibold text-[15px] inline-flex items-center gap-1.5 ${nav === "papers" ? ACCENT.papers.text : ACCENT.learn.text}`}>
+                  {nav === "papers" ? <FileText size={14} /> : <GraduationCap size={14} />}
+                  {nav === "papers" ? "Paper Studio" : "Learn"}
+                </div>
+                <div className="text-[11px] text-gray-500">{nav === "papers" ? "Exam papers in your format" : "Chat with your material"}</div>
               </div>
-              <button onClick={nav === "papers" ? newPaper : newChat} className="h-8 w-8 grid place-items-center rounded-lg bg-indigo-600 text-white hover:bg-indigo-500 transition shadow-sm" title={nav === "papers" ? "New paper" : "New chat"} aria-label="New">
-                <Plus size={16} />
+              <button onClick={nav === "papers" ? newPaper : newChat} className={`px-2.5 h-8 inline-flex items-center gap-1 rounded-lg text-white transition shadow-sm text-xs font-medium ${nav === "papers" ? `${ACCENT.papers.solid} ${ACCENT.papers.solidHover}` : `${ACCENT.learn.solid} ${ACCENT.learn.solidHover}`}`} title={nav === "papers" ? "New paper" : "New chat"} aria-label="New">
+                <Plus size={14} /> New
               </button>
             </div>
             <div className="mt-1 px-2 flex-1 overflow-y-auto">
@@ -885,7 +918,7 @@ export default function Home() {
               <button onClick={() => setSidebarOpen(true)} className="md:hidden text-gray-500 p-1.5" aria-label="Menu"><Menu size={20} /></button>
               <span className="truncate font-medium text-gray-900">{current?.title || "New chat"}</span>
               {isPaper ? (
-                <span className="shrink-0 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-indigo-600 text-white">Paper</span>
+                <span className="shrink-0 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-violet-600 text-white">Paper</span>
               ) : contentReady ? (
                 <span className="shrink-0 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600 border border-indigo-100">From your material</span>
               ) : (
@@ -913,7 +946,7 @@ export default function Home() {
               {messages.length === 0 && (
                 isPaper ? (
                   <div className="min-h-[55vh] flex flex-col items-center justify-center text-center gap-4">
-                    <div className="h-14 w-14 rounded-2xl bg-indigo-600 text-white grid place-items-center shadow-md shadow-indigo-200"><FileText size={26} /></div>
+                    <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-violet-600 to-indigo-600 text-white grid place-items-center shadow-md shadow-violet-200"><FileText size={26} /></div>
                     <div className="text-xl text-gray-900 font-semibold tracking-tight">Generate an exam paper from your material</div>
                     <ol className="text-sm text-gray-600 text-left space-y-1.5 max-w-md list-decimal pl-5">
                       <li>Attach a sample/past paper (file or photo) with <Paperclip size={12} className="inline" /> — it copies YOUR institute&apos;s exact format</li>
@@ -945,7 +978,7 @@ export default function Home() {
                       onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
                       onDragLeave={() => setDragOver(false)}
                       onDrop={handleDrop}
-                      className={`w-full max-w-lg cursor-pointer rounded-2xl border-2 border-dashed p-8 text-center transition bg-white shadow-sm ${dragOver ? "border-indigo-500 bg-indigo-50" : "border-gray-300 hover:border-indigo-400"}`}
+                      className={`w-full max-w-lg cursor-pointer rounded-2xl border-2 border-dashed p-8 text-center transition bg-gradient-to-b from-white to-indigo-50/50 shadow-sm ${dragOver ? "border-indigo-500 bg-indigo-50" : "border-indigo-200 hover:border-indigo-400"}`}
                     >
                       <input type="file" multiple accept=".pdf,.txt,.md,.csv,.docx,.pptx,.png,.jpg,.jpeg,.webp" onChange={handleUpload} className="hidden" disabled={!!busy} />
                       <UploadCloud size={32} className="mx-auto text-indigo-500 mb-3" />
@@ -954,16 +987,19 @@ export default function Home() {
                       {busy && <div className="text-xs text-indigo-600 animate-pulse mt-3">{busy}</div>}
                     </label>
                     <div className="grid sm:grid-cols-3 gap-3 w-full max-w-lg">
-                      <div className="rounded-xl border border-gray-200 bg-white p-3.5 shadow-sm">
-                        <div className="flex items-center gap-1.5 text-gray-900 font-medium text-[13px]"><BookOpen size={14} className="text-indigo-500" /> Ask your material</div>
+                      <div className="rounded-xl border border-indigo-100 bg-gradient-to-b from-indigo-50/80 to-white p-3.5 shadow-sm">
+                        <div className="h-7 w-7 rounded-lg bg-indigo-600 text-white grid place-items-center mb-2"><BookOpen size={14} /></div>
+                        <div className="text-gray-900 font-medium text-[13px]">Ask your material</div>
                         <p className="text-[11px] text-gray-500 mt-1 leading-relaxed">Every answer cited from YOUR books &amp; notes.</p>
                       </div>
-                      <div className="rounded-xl border border-gray-200 bg-white p-3.5 shadow-sm">
-                        <div className="flex items-center gap-1.5 text-gray-900 font-medium text-[13px]"><ListChecks size={14} className="text-indigo-500" /> Test yourself</div>
+                      <div className="rounded-xl border border-emerald-100 bg-gradient-to-b from-emerald-50/80 to-white p-3.5 shadow-sm">
+                        <div className="h-7 w-7 rounded-lg bg-emerald-600 text-white grid place-items-center mb-2"><ListChecks size={14} /></div>
+                        <div className="text-gray-900 font-medium text-[13px]">Test yourself</div>
                         <p className="text-[11px] text-gray-500 mt-1 leading-relaxed">Quizzes that re-drill what you got wrong.</p>
                       </div>
-                      <button onClick={newPaper} className="rounded-xl border border-indigo-200 bg-indigo-50/60 p-3.5 text-left hover:bg-indigo-50 transition shadow-sm">
-                        <div className="flex items-center gap-1.5 text-indigo-700 font-medium text-[13px]"><FileText size={14} /> Exam papers →</div>
+                      <button onClick={newPaper} className="rounded-xl border border-violet-200 bg-gradient-to-b from-violet-50 to-white p-3.5 text-left hover:from-violet-100 transition shadow-sm">
+                        <div className="h-7 w-7 rounded-lg bg-violet-600 text-white grid place-items-center mb-2"><FileText size={14} /></div>
+                        <div className="text-violet-700 font-medium text-[13px]">Exam papers →</div>
                         <p className="text-[11px] text-gray-500 mt-1 leading-relaxed">In your institute&apos;s exact format, with answer key.</p>
                       </button>
                     </div>
@@ -973,15 +1009,16 @@ export default function Home() {
               )}
 
               {messages.map((m, i) => (
-                <div key={i} className={m.role === "user" ? "flex justify-end" : "flex justify-start"}>
-                  <div className={m.role === "user" ? "max-w-[85%] rounded-2xl rounded-br-md bg-indigo-600 text-white px-4 py-2.5 text-[15px] whitespace-pre-wrap shadow-sm" : "max-w-full w-full"}>
+                <div key={i} className={m.role === "user" ? "flex justify-end" : "flex justify-start gap-2.5"}>
+                  {m.role === "assistant" && <div className="shrink-0 mt-1.5 hidden sm:block"><Logo size={24} /></div>}
+                  <div className={m.role === "user" ? "max-w-[85%] rounded-2xl rounded-br-md bg-gradient-to-br from-indigo-600 to-violet-600 text-white px-4 py-2.5 text-[15px] whitespace-pre-wrap shadow-md shadow-indigo-100" : "max-w-full flex-1 min-w-0"}>
                     {m.role === "assistant" ? (
                       m.type === "paper" && m.content.length > 80 && !(streaming && i === messages.length - 1) ? (
                         /* Papers render compactly in the thread — the real thing lives in the A4 preview */
-                        <button onClick={() => { setPreviewSel((p) => ({ ...p, [currentId]: i })); setPreviewOpen(true); }} className={`w-full text-left rounded-2xl border px-4 py-3 shadow-sm transition ${previewIdx === i ? "bg-indigo-50/70 border-indigo-200" : "bg-white border-gray-200 hover:border-indigo-300"}`}>
-                          <div className="flex items-center gap-2 text-sm font-medium text-gray-900"><FileText size={15} className="text-indigo-500" /> {m.content.split("\n").find((l) => l.trim())?.replace(/^#+\s*/, "").slice(0, 60) || "Generated paper"}</div>
+                        <button onClick={() => { setPreviewSel((p) => ({ ...p, [currentId]: i })); setPreviewOpen(true); }} className={`w-full text-left rounded-2xl border px-4 py-3 shadow-sm transition ${previewIdx === i ? "bg-violet-50/80 border-violet-300" : "bg-white border-gray-200 hover:border-violet-300"}`}>
+                          <div className="flex items-center gap-2 text-sm font-medium text-gray-900"><span className="h-6 w-6 rounded-md bg-violet-600 text-white grid place-items-center shrink-0"><FileText size={13} /></span> {m.content.split("\n").find((l) => l.trim())?.replace(/^#+\s*/, "").slice(0, 60) || "Generated paper"}</div>
                           <div className="text-xs text-gray-500 mt-1 line-clamp-2">{m.content.replace(/[#*]/g, "").slice(0, 150)}…</div>
-                          <div className="text-[11px] text-indigo-600 mt-1.5 inline-flex items-center gap-1"><Eye size={11} /> {previewIdx === i ? "Showing in preview" : "Show in preview"}</div>
+                          <div className="text-[11px] text-violet-600 mt-1.5 inline-flex items-center gap-1"><Eye size={11} /> {previewIdx === i ? "Showing in preview →" : "Show in preview →"}</div>
                         </button>
                       ) : (
                         <div className="rounded-2xl bg-white border border-gray-200 px-4 py-3 shadow-sm">
@@ -1095,7 +1132,10 @@ export default function Home() {
                     <button onClick={() => current && updateConvo(current.id, { pattern: "", patternName: "", patternId: "", patternLayout: undefined })} className="hover:text-red-500" aria-label="Remove format"><X size={11} /></button>
                   </span>
                 ) : (
-                  <span className="text-gray-400 inline-flex items-center gap-1"><Paperclip size={11} /> {patternLoading ? "Reading format…" : "no format attached"}</span>
+                  <label className="inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-dashed border-violet-300 text-violet-600 cursor-pointer hover:bg-violet-50 transition">
+                    <input type="file" accept=".pdf,.txt,.md,.csv,.docx,.pptx,.png,.jpg,.jpeg,.webp" onChange={handlePatternUpload} className="hidden" />
+                    <Paperclip size={11} /> {patternLoading ? "Reading format…" : "Attach format sample"}
+                  </label>
                 )}
                 {docs.length > 0 && (
                   <span className="inline-flex items-center flex-wrap gap-1.5">
@@ -1146,7 +1186,7 @@ export default function Home() {
                     <Square size={13} fill="currentColor" />
                   </button>
                 ) : (
-                  <button onClick={() => send(input)} disabled={connected === false || generating || !input.trim()} className="h-9 w-9 shrink-0 grid place-items-center rounded-xl bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-30 transition m-1.5" aria-label="Send">
+                  <button onClick={() => send(input)} disabled={connected === false || generating || !input.trim()} className="h-9 w-9 shrink-0 grid place-items-center rounded-xl bg-gradient-to-br from-indigo-600 to-violet-600 text-white hover:from-indigo-500 hover:to-violet-500 disabled:opacity-30 transition m-1.5 shadow-sm" aria-label="Send">
                     <ArrowUp size={17} strokeWidth={2.5} />
                   </button>
                 )}
