@@ -1,5 +1,5 @@
 """
-api.py — StudyMind backend (FastAPI).
+api.py — Illomra backend (FastAPI).
 
 This is the API layer. It reuses the engine (rag_engine.py) and exposes it
 over HTTP so a Next.js/React frontend can call it.
@@ -72,7 +72,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="StudyMind API", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="Illomra API", version="0.2.0", lifespan=lifespan)
 
 
 # ---- Middleware --------------------------------------------------------------
@@ -202,6 +202,7 @@ class QuizIn(BaseModel):
     num_questions: int = 5
     source: str = ""
     topic: str = ""  # optional focus topic — used as the retrieval query when given
+    avoid: list = []  # stems of recently asked questions, to prevent repeats
 
 
 class SummaryIn(BaseModel):
@@ -467,7 +468,8 @@ def chat_stream(body: ChatIn):
 def quiz(body: QuizIn):
     try:
         return {"questions": get_engine().generate_quiz(
-            num_questions=body.num_questions, source=body.source, topic=body.topic)}
+            num_questions=body.num_questions, source=body.source, topic=body.topic,
+            avoid=[a for a in body.avoid if isinstance(a, str)][:20])}
     except Exception as e:
         raise _ai_http_error(e)
 

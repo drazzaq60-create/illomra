@@ -2,11 +2,32 @@
 // Every function here maps to one endpoint in backend/api.py.
 
 const BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-// Optional shared access token for deployed instances (matches backend APP_ACCESS_TOKEN).
-const TOKEN = process.env.NEXT_PUBLIC_API_TOKEN || "";
+
+// Access token for deployed instances (matches backend APP_ACCESS_TOKEN).
+// Priority: what the user typed into the lock screen (localStorage) > build-time env.
+function getToken(): string {
+  try {
+    const t = localStorage.getItem("illomra_token");
+    if (t) return t;
+  } catch {
+    // SSR / storage blocked — fall through
+  }
+  return process.env.NEXT_PUBLIC_API_TOKEN || "";
+}
+
+export function setToken(t: string) {
+  try {
+    localStorage.setItem("illomra_token", t);
+  } catch {
+    // storage blocked — token will only last this page load
+  }
+}
+
+export class AuthError extends Error {}
 
 function authHeaders(extra: Record<string, string> = {}): Record<string, string> {
-  return TOKEN ? { ...extra, Authorization: `Bearer ${TOKEN}` } : extra;
+  const token = getToken();
+  return token ? { ...extra, Authorization: `Bearer ${token}` } : extra;
 }
 
 export type Source = { content: string; source: string; page: string | number };
@@ -75,6 +96,7 @@ async function req(path: string, options?: RequestInit) {
     } catch {
       // response wasn't JSON — keep statusText
     }
+    if (res.status === 401) throw new AuthError(detail);
     throw new Error(detail);
   }
   return res.json();
@@ -150,11 +172,11 @@ export const api = {
     }
   },
 
-  quiz: (num_questions: number, source = "", topic = ""): Promise<{ questions: QuizQuestion[] }> =>
+  quiz: (num_questions: number, source = "", topic = "", avoid: string[] = []): Promise<{ questions: QuizQuestion[] }> =>
     req("/quiz", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ num_questions, source, topic }),
+      body: JSON.stringify({ num_questions, source, topic, avoid }),
     }),
 
   summary: (source = ""): Promise<{ summary: string }> =>

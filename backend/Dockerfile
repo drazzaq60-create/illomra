@@ -1,4 +1,4 @@
-# StudyMind backend — FastAPI + local embeddings + Chroma.
+# Illomra backend — FastAPI + local embeddings + Chroma.
 # Built for Hugging Face Spaces (Docker Space, port 7860) but works anywhere:
 #   docker build -t studymind-backend .
 #   docker run -p 7860:7860 -e GOOGLE_API_KEY=... -v studymind_data:/data studymind-backend

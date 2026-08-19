@@ -1,8 +1,8 @@
-# StudyMind
+# Illomra
 
 **Answers from YOUR material — not the internet.**
 
-StudyMind is a study & teaching tool for students and teachers, built around
+Illomra is a study & teaching tool for students and teachers, built around
 Retrieval-Augmented Generation (RAG):
 
 - **Students** upload their own textbooks, notes, slides, or lecture links, then
