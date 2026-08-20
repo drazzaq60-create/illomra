@@ -57,9 +57,14 @@ PATTERN_DIR = os.getenv(
 )
 os.makedirs(PATTERN_DIR, exist_ok=True)
 
-# If set (non-empty), every endpoint except /health requires
-# "Authorization: Bearer <token>". Unset = local dev, no auth.
+# ---- Auth modes ---------------------------------------------------------------
+# google : GOOGLE_OAUTH_CLIENT_ID set — users sign in with Google; every user's
+#          documents and chats are ISOLATED (owner = their Google account id).
+# token  : APP_ACCESS_TOKEN set — one shared access code (single team/workspace).
+# open   : neither set — local development, no auth.
+GOOGLE_OAUTH_CLIENT_ID = os.getenv("GOOGLE_OAUTH_CLIENT_ID", "").strip()
 APP_ACCESS_TOKEN = os.getenv("APP_ACCESS_TOKEN", "").strip()
+AUTH_MODE = "google" if GOOGLE_OAUTH_CLIENT_ID else ("token" if APP_ACCESS_TOKEN else "open")
 
 # Server-side conversation store — deployed users must not depend on one
 # browser's localStorage. Point at the persistent volume in production.
@@ -130,18 +135,45 @@ app.add_middleware(
 )
 
 
-# ---- Optional bearer-token auth ----------------------------------------------
-def require_auth(authorization: str = Header(default="")) -> None:
-    if not APP_ACCESS_TOKEN:
-        return  # local dev: auth disabled
-    expected = f"Bearer {APP_ACCESS_TOKEN}"
-    if not authorization or not secrets.compare_digest(authorization, expected):
-        raise HTTPException(status_code=401, detail="Missing or invalid access token.")
+# ---- Auth dependency -----------------------------------------------------------
+# Verifies the caller and yields their OWNER id, which fences all data access:
+# google mode -> the Google account's stable id ('sub'); other modes -> None
+# (single-tenant: no per-user fencing, current behavior).
+_google_request = None  # lazy transport (fetches+caches Google's signing certs)
 
 
-# Every route on this router requires auth (when APP_ACCESS_TOKEN is set).
-# /health is registered directly on the app and stays open.
-router = APIRouter(dependencies=[Depends(require_auth)])
+def _verify_google_token(token: str) -> str:
+    global _google_request
+    from google.oauth2 import id_token as google_id_token
+    from google.auth.transport import requests as google_requests
+    if _google_request is None:
+        _google_request = google_requests.Request()
+    try:
+        info = google_id_token.verify_oauth2_token(token, _google_request, GOOGLE_OAUTH_CLIENT_ID)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired Google sign-in — sign in again.")
+    sub = str(info.get("sub", "")).strip()
+    if not sub:
+        raise HTTPException(status_code=401, detail="Google sign-in did not include an account id.")
+    return f"g{sub}"
+
+
+def current_owner(authorization: str = Header(default="")) -> "str | None":
+    if AUTH_MODE == "google":
+        if not authorization.startswith("Bearer "):
+            raise HTTPException(status_code=401, detail="Sign in with Google to continue.")
+        return _verify_google_token(authorization.removeprefix("Bearer ").strip())
+    if AUTH_MODE == "token":
+        expected = f"Bearer {APP_ACCESS_TOKEN}"
+        if not authorization or not secrets.compare_digest(authorization, expected):
+            raise HTTPException(status_code=401, detail="Missing or invalid access token.")
+        return None  # shared workspace — no per-user fencing
+    return None  # open/local dev
+
+
+# Every route on this router requires auth. /health is registered directly on
+# the app and stays open.
+router = APIRouter(dependencies=[Depends(current_owner)])
 
 
 # ---- Engine (one shared instance, single-process) -----------------------------
@@ -407,6 +439,7 @@ def health():
         return {"status": "degraded", "documents": 0, "chunks": 0, "store_ok": False}
     return {
         "status": "ok",
+        "auth": AUTH_MODE,
         "documents": eng.doc_count,
         "chunks": eng.chunk_count,
         "store_ok": not eng.store_error,
@@ -414,12 +447,12 @@ def health():
 
 
 @router.post("/upload")
-async def upload(file: UploadFile = File(...)):
+async def upload(file: UploadFile = File(...), owner: "str | None" = Depends(current_owner)):
     data = await file.read()
     if len(data) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail=UPLOAD_TOO_BIG)
     try:
-        chunks = get_engine().process_file(_UploadShim(file.filename, data))
+        chunks = get_engine().process_file(_UploadShim(file.filename, data), owner=owner)
     except HTTPException:
         raise
     except Exception as e:
@@ -429,18 +462,18 @@ async def upload(file: UploadFile = File(...)):
         log.exception("Upload failed for %r", file.filename)
         raise HTTPException(status_code=400,
                             detail="Couldn't read that file — supported: PDF, Word, PPT, TXT, MD, CSV, or a photo (JPG/PNG).")
-    return {"filename": file.filename, "chunks": chunks, "stats": get_engine().get_stats()}
+    return {"filename": file.filename, "chunks": chunks, "stats": get_engine().get_stats(owner)}
 
 
 @router.post("/link")
-def link(body: UrlIn):
+def link(body: UrlIn, owner: "str | None" = Depends(current_owner)):
     """Smart link handler: YouTube link -> transcript, anything else -> web page."""
     url = body.url.strip()
     try:
         if extract_video_id(url):
-            chunks = get_engine().process_youtube_url(url)
+            chunks = get_engine().process_youtube_url(url, owner=owner)
         else:
-            chunks = get_engine().process_url(url)
+            chunks = get_engine().process_url(url, owner=owner)
     except HTTPException:
         raise
     except ValueError as e:
@@ -450,11 +483,11 @@ def link(body: UrlIn):
         log.exception("Link ingestion failed for %r", url)
         raise HTTPException(status_code=400,
                             detail="Couldn't read that link — the site may block bots or need a login.")
-    return {"chunks": chunks, "stats": get_engine().get_stats()}
+    return {"chunks": chunks, "stats": get_engine().get_stats(owner)}
 
 
 @router.post("/chat-stream")
-def chat_stream(body: ChatIn):
+def chat_stream(body: ChatIn, owner: "str | None" = Depends(current_owner)):
     if not body.question.strip():
         raise HTTPException(status_code=400, detail="Ask a question first.")
 
@@ -467,6 +500,7 @@ def chat_stream(body: ChatIn):
                 source=body.source,
                 paper_opts=body.paper_opts,
                 ref_sources=[s for s in body.sources if isinstance(s, str) and s] or None,
+                owner=owner,
             ):
                 yield json.dumps(part) + "\n"
         except Exception as e:
@@ -478,33 +512,33 @@ def chat_stream(body: ChatIn):
 
 
 @router.post("/quiz")
-def quiz(body: QuizIn):
+def quiz(body: QuizIn, owner: "str | None" = Depends(current_owner)):
     try:
         return {"questions": get_engine().generate_quiz(
             num_questions=body.num_questions, source=body.source, topic=body.topic,
-            avoid=[a for a in body.avoid if isinstance(a, str)][:20])}
+            avoid=[a for a in body.avoid if isinstance(a, str)][:20], owner=owner)}
     except Exception as e:
         raise _ai_http_error(e)
 
 
 @router.post("/summary")
-def summary(body: SummaryIn = SummaryIn()):
+def summary(body: SummaryIn = SummaryIn(), owner: "str | None" = Depends(current_owner)):
     try:
-        return get_engine().summarize(source=body.source)
+        return get_engine().summarize(source=body.source, owner=owner)
     except Exception as e:
         raise _ai_http_error(e)
 
 
 @router.get("/documents")
-def documents():
-    """List every indexed document with its chunk count (powers the doc manager)."""
-    return {"documents": get_engine().list_documents()}
+def documents(owner: "str | None" = Depends(current_owner)):
+    """List the caller's indexed documents (powers the doc manager)."""
+    return {"documents": get_engine().list_documents(owner)}
 
 
 @router.post("/documents/delete")
-def delete_document(body: DeleteDocIn):
+def delete_document(body: DeleteDocIn, owner: "str | None" = Depends(current_owner)):
     try:
-        stats = get_engine().delete_document(body.source)
+        stats = get_engine().delete_document(body.source, owner=owner)
     except HTTPException:
         raise
     except Exception:
@@ -578,15 +612,26 @@ def export(body: ExportIn):
 
 
 @router.get("/stats")
-def stats():
-    return get_engine().get_stats()
+def stats(owner: "str | None" = Depends(current_owner)):
+    return get_engine().get_stats(owner)
+
+
+def _convo_path(owner: "str | None") -> str:
+    """One conversation file per owner. Single-tenant modes keep the legacy path
+    so existing chats survive; Google users each get their own file."""
+    if not owner:
+        return CONVO_STORE
+    safe = "".join(ch for ch in owner if ch.isalnum())[:64] or "unknown"
+    d = CONVO_STORE + ".d"
+    os.makedirs(d, exist_ok=True)
+    return os.path.join(d, f"{safe}.json")
 
 
 @router.get("/convos")
-def get_convos():
-    """The saved conversation list — so chats follow the workspace, not one browser."""
+def get_convos(owner: "str | None" = Depends(current_owner)):
+    """The saved conversation list — chats follow the account, not one browser."""
     try:
-        with open(CONVO_STORE, "r", encoding="utf-8") as f:
+        with open(_convo_path(owner), "r", encoding="utf-8") as f:
             data = json.load(f)
         return {"convos": data.get("convos", []), "current": data.get("current", "")}
     except Exception:
@@ -594,30 +639,33 @@ def get_convos():
 
 
 @router.put("/convos")
-def put_convos(body: ConvosIn):
+def put_convos(body: ConvosIn, owner: "str | None" = Depends(current_owner)):
     data = {"convos": body.convos[:300], "current": body.current}
     raw = json.dumps(data, ensure_ascii=False)
     if len(raw) > 8_000_000:
         raise HTTPException(status_code=413,
                             detail="Chat history is too large to save — delete some old chats.")
+    path = _convo_path(owner)
     with _convo_lock:
-        tmp = CONVO_STORE + ".tmp"
+        tmp = path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             f.write(raw)
-        os.replace(tmp, CONVO_STORE)
+        os.replace(tmp, path)
     return {"status": "saved"}
 
 
 @router.get("/usage")
 def usage():
     """Per-model free-tier usage for the UI's limit bar (our own counts —
-    Google exposes no remaining-quota API, so daily_limit values are estimates)."""
+    Google exposes no remaining-quota API, so daily_limit values are estimates).
+    The Gemini key is shared, so this is workspace-wide by design."""
     return get_engine().usage_snapshot()
 
 
 @router.post("/reset")
-def reset():
-    get_engine().reset()
+def reset(owner: "str | None" = Depends(current_owner)):
+    """Clear materials — only the caller's own in Google mode; everything otherwise."""
+    get_engine().reset(owner=owner)
     return {"status": "reset"}
 
 

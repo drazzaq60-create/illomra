@@ -102,8 +102,16 @@ async function req(path: string, options?: RequestInit) {
   return res.json();
 }
 
+export function clearToken() {
+  try {
+    localStorage.removeItem("illomra_token");
+  } catch {
+    // storage blocked
+  }
+}
+
 export const api = {
-  health: (): Promise<{ status: string; documents?: number; chunks?: number }> =>
+  health: (): Promise<{ status: string; auth?: "google" | "token" | "open"; documents?: number; chunks?: number }> =>
     req("/health"),
 
   upload: (file: File): Promise<{ filename: string; chunks: number; stats: Stats }> => {

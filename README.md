@@ -71,10 +71,19 @@ python -m pytest tests/ -v
 | `GOOGLE_API_KEY` | yes | Gemini API key (free at aistudio.google.com) |
 | `PERSIST_DIR` | no | Vector-store folder (default: `backend/chroma_db`; use `/data/chroma_db` on a host with a volume) |
 | `CORS_ORIGINS` | no | Comma-separated allowed frontend origins (default `http://localhost:3000`) |
-| `APP_ACCESS_TOKEN` | no | If set, every endpoint except `/health` requires `Authorization: Bearer <token>` — set it on any public deployment |
+| `APP_ACCESS_TOKEN` | no | Shared access-code mode: every endpoint except `/health` requires `Authorization: Bearer <token>` |
+| `GOOGLE_OAUTH_CLIENT_ID` | no | **Google Sign-In mode** (overrides the token): users sign in with Google and each account's documents + chats are fully isolated |
 
 Frontend env (Vercel → Project Settings): `NEXT_PUBLIC_API_URL` (backend URL),
-`NEXT_PUBLIC_API_TOKEN` (same value as `APP_ACCESS_TOKEN`).
+plus `NEXT_PUBLIC_GOOGLE_CLIENT_ID` (same client id) for Google mode, or
+`NEXT_PUBLIC_API_TOKEN` (same value as `APP_ACCESS_TOKEN`) for token mode.
+
+### Setting up Google Sign-In (one-time, ~10 min)
+1. [console.cloud.google.com](https://console.cloud.google.com) → create/select a project.
+2. **APIs & Services → OAuth consent screen** → External → fill app name + your email → add yourself as a test user (or publish).
+3. **APIs & Services → Credentials → Create credentials → OAuth client ID → Web application.**
+   Authorized JavaScript origins: `http://localhost:3000` and your deployed frontend URL.
+4. Copy the Client ID into backend `GOOGLE_OAUTH_CLIENT_ID` and frontend `NEXT_PUBLIC_GOOGLE_CLIENT_ID`. Done — the app switches to Google auth automatically.
 
 ## Deploy (pilot-grade, ~$5/mo)
 1. **Backend → Hugging Face Spaces** (Docker Space, free 16GB RAM; +$5/mo
@@ -102,6 +111,7 @@ or give each academy its own key.
 - SSRF guard on link ingestion (private/internal addresses refused)
 - 20MB upload cap; prompt-injection fencing on all retrieved material
 - Raw errors stay in server logs; clients get generic messages
-- **Single-tenant by design** — one deployment = one user/team. Per-user
-  isolation (login + per-user collections) is the next milestone before any
-  shared public deployment.
+- **Multi-user ready via Google Sign-In** — with `GOOGLE_OAUTH_CLIENT_ID` set,
+  ID tokens are verified server-side on every request and ALL data access
+  (documents, retrieval, chats, reset) is fenced to the signed-in account.
+  Without it, the app runs single-tenant (access-code or open local dev).

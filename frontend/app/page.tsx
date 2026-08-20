@@ -8,7 +8,31 @@ import {
   Paperclip, Mic, ArrowUp, Square, Menu, Globe, Download, ListChecks, ScrollText,
   UploadCloud, X, RotateCcw, FileDown, GraduationCap, Link2, Eye, KeyRound,
 } from "lucide-react";
-import { api, setToken, AuthError, type QuizQuestion, type Source, type Usage, type Stats, type Doc, type QuotaSnapshot, type PaperLayout } from "@/lib/api";
+import { api, setToken, clearToken, AuthError, type QuizQuestion, type Source, type Usage, type Stats, type Doc, type QuotaSnapshot, type PaperLayout } from "@/lib/api";
+
+/* ── Google Identity Services (Sign in with Google) ── */
+type GsiId = {
+  initialize: (cfg: { client_id: string; callback: (r: { credential: string }) => void; auto_select?: boolean }) => void;
+  renderButton: (el: HTMLElement, opts: Record<string, unknown>) => void;
+  disableAutoSelect: () => void;
+};
+const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "";
+
+function getGsi(): GsiId | null {
+  const w = window as unknown as { google?: { accounts?: { id?: GsiId } } };
+  return w.google?.accounts?.id ?? null;
+}
+
+type Profile = { name?: string; email?: string; picture?: string };
+
+function parseProfile(jwt: string): Profile {
+  try {
+    const payload = JSON.parse(atob(jwt.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+    return { name: payload.name, email: payload.email, picture: payload.picture };
+  } catch {
+    return {};
+  }
+}
 
 type Msg = {
   role: "user" | "assistant";
@@ -180,6 +204,9 @@ export default function Home() {
   const [nav, setNav] = useState<NavSpace>("learn");
   const [locked, setLocked] = useState(false);
   const [tokenInput, setTokenInput] = useState("");
+  const [authMode, setAuthMode] = useState<"google" | "token" | "open">("open");
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const googleBtnRef = useRef<HTMLDivElement>(null);
   const [connected, setConnected] = useState<boolean | null>(null);
   const [quota, setQuota] = useState<QuotaSnapshot | null>(null);
   const [docs, setDocs] = useState<Doc[]>([]);
@@ -301,11 +328,55 @@ export default function Home() {
   // Mount-only backend handshake (async — state lands after the fetch resolves).
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    api.health().then(() => setConnected(true)).catch(() => setConnected(false));
+    api.health().then((h) => { setConnected(true); if (h.auth) setAuthMode(h.auth); }).catch(() => setConnected(false));
     refreshDocs();
     refreshQuota();
+    try {
+      const t = localStorage.getItem("illomra_token");
+      if (t && t.split(".").length === 3) setProfile(parseProfile(t));
+    } catch {
+      // storage blocked
+    }
   }, []);
   /* eslint-enable react-hooks/set-state-in-effect */
+
+  // Google Sign-In: load GIS and render the button whenever the lock screen
+  // needs it (google auth mode only).
+  useEffect(() => {
+    if (!locked || authMode !== "google" || !GOOGLE_CLIENT_ID) return;
+    const onCredential = (resp: { credential: string }) => {
+      setToken(resp.credential);
+      setProfile(parseProfile(resp.credential));
+      refreshDocs();
+      refreshQuota();
+    };
+    const render = () => {
+      const gsi = getGsi();
+      if (!gsi || !googleBtnRef.current) return;
+      gsi.initialize({ client_id: GOOGLE_CLIENT_ID, callback: onCredential, auto_select: true });
+      googleBtnRef.current.innerHTML = "";
+      gsi.renderButton(googleBtnRef.current, { theme: "outline", size: "large", shape: "pill", width: 280 });
+    };
+    if (getGsi()) {
+      render();
+      return;
+    }
+    const s = document.createElement("script");
+    s.src = "https://accounts.google.com/gsi/client";
+    s.async = true;
+    s.onload = render;
+    document.head.appendChild(s);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [locked, authMode]);
+
+  function signOut() {
+    clearToken();
+    setProfile(null);
+    getGsi()?.disableAutoSelect();
+    setLocked(true);
+    setDocs([]);
+    setStats({ documents: 0, chunks: 0 });
+  }
 
   async function unlock() {
     const t = tokenInput.trim();
@@ -807,24 +878,34 @@ export default function Home() {
         <div className="fixed inset-0 z-50 bg-gradient-to-br from-indigo-50 via-white to-violet-50 flex items-center justify-center p-6">
           <div className="w-full max-w-sm bg-white rounded-2xl border border-gray-200 shadow-lg p-8 text-center">
             <div className="flex justify-center mb-3"><Logo size={48} /></div>
-            <div className="text-xl font-semibold text-gray-900">Illomra</div>
-            <p className="text-sm text-gray-500 mt-1 mb-5">This workspace is private. Enter your access code to continue.</p>
-            <div className="flex items-center gap-2">
-              <div className="flex-1 flex items-center gap-2 rounded-xl border-2 border-gray-200 focus-within:border-indigo-400 px-3 py-2.5 bg-gray-50">
-                <KeyRound size={15} className="text-gray-400 shrink-0" />
-                <input
-                  type="password"
-                  value={tokenInput}
-                  onChange={(e) => setTokenInput(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") unlock(); }}
-                  placeholder="Access code"
-                  className="flex-1 min-w-0 bg-transparent outline-none text-sm text-gray-900 placeholder:text-gray-400"
-                  autoFocus
-                />
-              </div>
-              <button onClick={unlock} disabled={!tokenInput.trim()} className="px-4 py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-500 disabled:opacity-40 transition">Enter</button>
-            </div>
-            <p className="text-[11px] text-gray-400 mt-4">Ask whoever set up this Illomra for the code.</p>
+            <div className="font-display text-xl font-semibold text-gray-900">Illomra</div>
+            {authMode === "google" ? (
+              <>
+                <p className="text-sm text-gray-500 mt-1 mb-5">Sign in to open your own workspace — your materials and chats are private to your account.</p>
+                <div ref={googleBtnRef} className="flex justify-center min-h-[44px]" />
+                <p className="text-[11px] text-gray-400 mt-4">Powered by Google Sign-In. We never see your password.</p>
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-gray-500 mt-1 mb-5">This workspace is private. Enter your access code to continue.</p>
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 flex items-center gap-2 rounded-xl border-2 border-gray-200 focus-within:border-indigo-400 px-3 py-2.5 bg-gray-50">
+                    <KeyRound size={15} className="text-gray-400 shrink-0" />
+                    <input
+                      type="password"
+                      value={tokenInput}
+                      onChange={(e) => setTokenInput(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") unlock(); }}
+                      placeholder="Access code"
+                      className="flex-1 min-w-0 bg-transparent outline-none text-sm text-gray-900 placeholder:text-gray-400"
+                      autoFocus
+                    />
+                  </div>
+                  <button onClick={unlock} disabled={!tokenInput.trim()} className="px-4 py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-500 disabled:opacity-40 transition">Enter</button>
+                </div>
+                <p className="text-[11px] text-gray-400 mt-4">Ask whoever set up this Illomra for the code.</p>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -846,6 +927,16 @@ export default function Home() {
           </button>
         )}
         <button onClick={exportChats} title="Export all chats (JSON)" aria-label="Export chats" className="h-9 w-9 grid place-items-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-indigo-600 transition"><FileDown size={16} /></button>
+        {authMode === "google" && profile && (
+          <button onClick={signOut} title={`Signed in as ${profile.email || profile.name || "you"} — click to sign out`} aria-label="Sign out" className="mt-1">
+            {profile.picture ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={profile.picture} alt="" referrerPolicy="no-referrer" className="h-8 w-8 rounded-full ring-2 ring-indigo-200 hover:ring-red-300 transition" />
+            ) : (
+              <span className="h-8 w-8 grid place-items-center rounded-full bg-indigo-600 text-white text-xs font-semibold">{(profile.name || profile.email || "?").slice(0, 1).toUpperCase()}</span>
+            )}
+          </button>
+        )}
       </nav>
 
       {/* ── Contextual panel ── */}
