@@ -21,9 +21,9 @@ COPY . .
 # /data is the persistent volume on HF Spaces / Fly.io — the vector store and
 # model cache must live there or every deploy wipes the teacher's documents.
 ENV PERSIST_DIR=/data/chroma_db
-ENV PORT=7860
+ENV PORT=10000
 
-EXPOSE 7860
+EXPOSE 10000
 
 # ONE worker only: Chroma's SQLite is single-writer and the engine is a
 # single shared in-process object. Scale vertically, not horizontally.

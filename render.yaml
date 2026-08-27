@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: illomra-backend
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    healthCheckPath: /health
+    envVars:
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: GOOGLE_OAUTH_CLIENT_ID
+        sync: false
+      - key: CORS_ORIGINS
+        value: https://illomra.vercel.app
+      - key: PORT
+        value: "10000"
