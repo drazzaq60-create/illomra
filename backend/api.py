@@ -245,6 +245,11 @@ class QuizIn(BaseModel):
     avoid: list = []  # stems of recently asked questions, to prevent repeats
 
 
+class FlashcardsIn(BaseModel):
+    num_cards: int = 8
+    source: str = ""
+
+
 class ConvosIn(BaseModel):
     convos: list = []
     current: str = ""
@@ -517,6 +522,15 @@ def quiz(body: QuizIn, owner: "str | None" = Depends(current_owner)):
         return {"questions": get_engine().generate_quiz(
             num_questions=body.num_questions, source=body.source, topic=body.topic,
             avoid=[a for a in body.avoid if isinstance(a, str)][:20], owner=owner)}
+    except Exception as e:
+        raise _ai_http_error(e)
+
+
+@router.post("/flashcards")
+def flashcards(body: FlashcardsIn, owner: "str | None" = Depends(current_owner)):
+    try:
+        return {"cards": get_engine().generate_flashcards(
+            num_cards=min(max(body.num_cards, 3), 20), source=body.source, owner=owner)}
     except Exception as e:
         raise _ai_http_error(e)
 

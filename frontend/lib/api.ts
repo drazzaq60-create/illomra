@@ -187,6 +187,13 @@ export const api = {
       body: JSON.stringify({ num_questions, source, topic, avoid }),
     }),
 
+  flashcards: (num_cards: number, source = ""): Promise<{ cards: { front: string; back: string }[] }> =>
+    req("/flashcards", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ num_cards, source }),
+    }),
+
   summary: (source = ""): Promise<{ summary: string }> =>
     req("/summary", {
       method: "POST",

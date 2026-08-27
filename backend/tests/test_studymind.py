@@ -86,7 +86,7 @@ def test_response_tier():
     assert eng._response_tier("make me a midterm paper", "SAMPLE")[0] == 8000
     # Mid-sentence "when" must NOT mark a medium question as short.
     assert eng._response_tier(
-        "How does backprop update the weights when the loss is high", "")[0] == 2500
+        "How does backprop update the weights when the loss is high", "")[0] == 4000
 
 
 # ---- 3. web-search trigger ---------------------------------------------------
@@ -125,6 +125,7 @@ class _BoomEngine:
 def test_chat_stream_contract(monkeypatch):
     fake = _FakeEngine()
     monkeypatch.setattr(api, "get_engine", lambda: fake)
+    monkeypatch.setattr(api, "AUTH_MODE", "open")
     # No context manager -> lifespan (real-engine warm-up) never runs.
     client = TestClient(api.app)
 
@@ -177,6 +178,7 @@ def test_ingest_roundtrip(tmp_path, monkeypatch):
     Local embeddings only — no Gemini call anywhere in this path."""
     monkeypatch.setattr(rag_engine, "PERSIST_DIR", str(tmp_path / "chroma"))
     monkeypatch.setattr(api, "_engine", None)  # force a fresh engine on the temp dir
+    monkeypatch.setattr(api, "AUTH_MODE", "open")
 
     client = TestClient(api.app)
 

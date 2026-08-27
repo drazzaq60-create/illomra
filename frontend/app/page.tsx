@@ -34,18 +34,22 @@ function parseProfile(jwt: string): Profile {
   }
 }
 
+type Flashcard = { front: string; back: string };
+
 type Msg = {
   role: "user" | "assistant";
   content: string;
-  type?: "quiz" | "paper";
+  type?: "quiz" | "paper" | "flashcards";
   quiz?: QuizQuestion[];
   quizAnswers?: Record<number, string>;
   quizDone?: boolean;
+  flashcards?: Flashcard[];
   sources?: Source[];
   confidence?: number;
   latency?: number;
   web?: boolean;
   model?: string; // which AI model answered (empty/primary = normal)
+  notice?: string; // end-of-stream notice (e.g. length limit hit)
 };
 
 type Convo = {
@@ -215,6 +219,47 @@ function QuizCard({ questions, saved, savedDone, onAnswer, onComplete, onRetry, 
   );
 }
 
+function FlashcardDeck({ cards }: { cards: Flashcard[] }) {
+  const [idx, setIdx] = useState(0);
+  const [flipped, setFlipped] = useState(false);
+  const card = cards[idx];
+  return (
+    <div className="space-y-3">
+      <div className="text-xs text-gray-400 text-center">{idx + 1} / {cards.length}</div>
+      {/* Flip card */}
+      <div
+        className="relative cursor-pointer select-none"
+        style={{ perspective: "800px" }}
+        onClick={() => setFlipped((f) => !f)}
+      >
+        <div
+          className="relative w-full transition-all duration-500"
+          style={{ transformStyle: "preserve-3d", transform: flipped ? "rotateY(180deg)" : "rotateY(0deg)", minHeight: "120px" }}
+        >
+          {/* Front */}
+          <div className="absolute inset-0 flex items-center justify-center rounded-xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-violet-50 p-5 text-sm font-medium text-indigo-900 text-center" style={{ backfaceVisibility: "hidden" }}>
+            {card.front}
+            <span className="absolute bottom-2 right-3 text-[10px] text-indigo-400">tap to flip</span>
+          </div>
+          {/* Back */}
+          <div className="absolute inset-0 flex items-center justify-center rounded-xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-teal-50 p-5 text-sm text-gray-800 text-center" style={{ backfaceVisibility: "hidden", transform: "rotateY(180deg)" }}>
+            {card.back}
+            <span className="absolute bottom-2 right-3 text-[10px] text-emerald-500">tap to flip back</span>
+          </div>
+        </div>
+      </div>
+      {/* Navigation */}
+      <div className="flex items-center justify-center gap-3">
+        <button disabled={idx === 0} onClick={() => { setIdx((i) => i - 1); setFlipped(false); }} className="px-3 py-1.5 rounded-lg border border-gray-300 text-gray-600 text-xs hover:border-indigo-400 hover:text-indigo-700 disabled:opacity-30 transition">← Prev</button>
+        <div className="flex gap-1">
+          {cards.map((_, i) => <div key={i} className={`h-1.5 w-1.5 rounded-full transition ${i === idx ? "bg-indigo-500" : "bg-gray-200"}`} />)}
+        </div>
+        <button disabled={idx === cards.length - 1} onClick={() => { setIdx((i) => i + 1); setFlipped(false); }} className="px-3 py-1.5 rounded-lg border border-gray-300 text-gray-600 text-xs hover:border-indigo-400 hover:text-indigo-700 disabled:opacity-30 transition">Next →</button>
+      </div>
+    </div>
+  );
+}
+
 export default function Home() {
   const [convos, setConvos] = useState<Convo[]>([]);
   const [currentId, setCurrentId] = useState("");
@@ -253,9 +298,15 @@ export default function Home() {
   const [renameValue, setRenameValue] = useState("");
   const [dragOver, setDragOver] = useState(false);
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
+  const [sidebarSearch, setSidebarSearch] = useState("");
+  const [weakTopics, setWeakTopics] = useState<string[]>([]);
+  const [flashLoading, setFlashLoading] = useState(false);
+  const [fcIdx, setFcIdx] = useState(0);
+  const [fcFlipped, setFcFlipped] = useState(false);
 
   const recognitionRef = useRef<{ stop: () => void; start: () => void } | null>(null);
   const voiceBaseRef = useRef("");
+  const thinkingNoteRef = useRef("");
   const chatEndRef = useRef<HTMLDivElement>(null);
   const scrollBoxRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -601,6 +652,7 @@ export default function Home() {
     setInput("");
     setThinking(true);
     setThinkingNote("");
+    thinkingNoteRef.current = "";
     setStreaming(true);
     abortRef.current = new AbortController();
     let started = false;
@@ -647,9 +699,10 @@ export default function Home() {
               }, 80);
             }
           },
-          onNotice: (note) => setThinkingNote(note),
+          onNotice: (note) => { setThinkingNote(note); thinkingNoteRef.current = note; },
           onDone: (meta) => {
             flushNow();
+            const lastNotice = thinkingNoteRef.current;
             if (meta.error) {
               flashError(meta.error);
               if (!started) setMessages((m) => [...m, { role: "assistant", content: "⚠️ " + meta.error }]);
@@ -667,7 +720,7 @@ export default function Home() {
             setMessages((m) => {
               const copy = [...m];
               const last = copy[copy.length - 1];
-              if (last && last.role === "assistant") copy[copy.length - 1] = { ...last, sources: meta.sources, confidence: meta.confidence, latency: meta.latency_ms, web: meta.web_used, model: meta.model };
+              if (last && last.role === "assistant") copy[copy.length - 1] = { ...last, sources: meta.sources, confidence: meta.confidence, latency: meta.latency_ms, web: meta.web_used, model: meta.model, notice: lastNotice || undefined };
               return copy;
             });
           },
@@ -739,6 +792,28 @@ export default function Home() {
 
   function patchMessage(index: number, patch: Partial<Msg>) {
     setMessages((m) => m.map((msg, i) => (i === index ? { ...msg, ...patch } : msg)));
+  }
+
+  async function genFlashcards() {
+    if (generating || flashLoading) return;
+    setFlashLoading(true);
+    try {
+      const res = await api.flashcards(quizCount, effectiveScope);
+      setMessages((m) => [...m, { role: "assistant", type: "flashcards", content: `${res.cards.length} flashcards from your material — tap a card to flip it`, flashcards: res.cards }]);
+      setFcIdx(0);
+      setFcFlipped(false);
+    } catch (err) {
+      flashError(err instanceof Error ? err.message : "Couldn't build flashcards");
+    } finally {
+      setFlashLoading(false);
+      refreshQuota();
+    }
+  }
+
+  function handleQuizComplete(msgIdx: number, questions: QuizQuestion[], answers: Record<number, string>) {
+    patchMessage(msgIdx, { quizDone: true });
+    const missed = questions.filter((q, i) => answers[i] !== q.answer).map((q) => q.question.slice(0, 80));
+    if (missed.length > 0) setWeakTopics((prev) => [...prev.filter((t) => !missed.includes(t)), ...missed].slice(-15));
   }
 
   async function handlePatternUpload(e: ChangeEvent<HTMLInputElement>) {
@@ -1013,14 +1088,45 @@ export default function Home() {
           </div>
         )}
 
-        <div className="mt-1 px-2 flex-1 overflow-y-auto">
-          {nav === "learn" && <div className="px-2 pt-1 text-[11px] uppercase tracking-wider text-gray-400 mb-1">Chats</div>}
-          {nav === "papers" && <div className="px-2 pt-1 text-[11px] text-gray-400 mb-1.5">References come from your Learn materials.</div>}
-          {(nav === "papers" ? paperConvos : chatConvos).map(convoRow)}
-          {(nav === "papers" ? paperConvos : chatConvos).length === 0 && (
-            <div className="px-2 text-[11px] text-gray-400">{nav === "papers" ? "No papers yet — hit + New to make your first one." : "No chats yet — hit + New."}</div>
-          )}
+        <div className="mt-1 px-2 flex-1 overflow-y-auto flex flex-col min-h-0">
+          {/* Chat search */}
+          <div className="px-1 mb-1.5">
+            <input
+              value={sidebarSearch}
+              onChange={(e) => setSidebarSearch(e.target.value)}
+              placeholder="Search chats…"
+              className="w-full rounded-lg bg-white/70 border border-gray-200 px-2.5 py-1.5 text-xs placeholder:text-gray-400 outline-none focus:border-indigo-400"
+            />
+          </div>
+          {nav === "learn" && !sidebarSearch && <div className="px-2 pt-0.5 text-[11px] uppercase tracking-wider text-gray-400 mb-1">Chats</div>}
+          {nav === "papers" && !sidebarSearch && <div className="px-2 pt-0.5 text-[11px] text-gray-400 mb-1.5">References come from your Learn materials.</div>}
+          {(() => {
+            const list = (nav === "papers" ? paperConvos : chatConvos);
+            const q = sidebarSearch.toLowerCase().trim();
+            const filtered = q ? list.filter((c) =>
+              c.title.toLowerCase().includes(q) ||
+              c.messages.some((m) => m.content.toLowerCase().includes(q))
+            ) : list;
+            return filtered.length > 0
+              ? filtered.map(convoRow)
+              : <div className="px-2 text-[11px] text-gray-400">{q ? "No chats match that search." : nav === "papers" ? "No papers yet — hit + New to make your first one." : "No chats yet — hit + New."}</div>;
+          })()}
         </div>
+
+        {/* Progress mini-dashboard */}
+        {convos.length > 0 && (() => {
+          const totalMsgs = convos.reduce((n, c) => n + c.messages.filter((m) => m.role === "user").length, 0);
+          const quizSessions = convos.reduce((n, c) => n + c.messages.filter((m) => m.type === "quiz").length, 0);
+          const flashSessions = convos.reduce((n, c) => n + c.messages.filter((m) => m.type === "flashcards").length, 0);
+          return (
+            <div className="border-t border-white/60 px-3 py-2 grid grid-cols-3 gap-1 text-center">
+              <div><div className="text-sm font-semibold text-indigo-700">{totalMsgs}</div><div className="text-[9px] text-gray-400">questions</div></div>
+              <div><div className="text-sm font-semibold text-violet-700">{quizSessions}</div><div className="text-[9px] text-gray-400">quizzes</div></div>
+              <div><div className="text-sm font-semibold text-emerald-700">{docs.length}</div><div className="text-[9px] text-gray-400">materials</div></div>
+              {flashSessions > 0 && <div className="col-span-3 text-[9px] text-gray-400 -mt-0.5">{flashSessions} flashcard session{flashSessions !== 1 ? "s" : ""}</div>}
+            </div>
+          );
+        })()}
 
         {/* AI limit bar */}
         {quota && quota.totals.capacity > 0 && (
@@ -1175,17 +1281,29 @@ export default function Home() {
                                   saved={m.quizAnswers ?? {}}
                                   savedDone={m.quizDone ?? false}
                                   onAnswer={(a) => patchMessage(i, { quizAnswers: a })}
-                                  onComplete={() => patchMessage(i, { quizDone: true })}
+                                  onComplete={() => m.quiz && handleQuizComplete(i, m.quiz, m.quizAnswers ?? {})}
                                   onRetry={() => patchMessage(i, { quizAnswers: {}, quizDone: false })}
                                   onPractice={(missed) => genQuiz(missed.map((q) => q.slice(0, 90)).join(" ; "))}
                                 />
                               )}
+                            </>
+                          ) : m.type === "flashcards" && m.flashcards ? (
+                            <>
+                              <div className="text-sm text-gray-500 mb-3">{m.content}</div>
+                              <FlashcardDeck cards={m.flashcards} />
                             </>
                           ) : (
                             <>
                               <div className={MD}>
                                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
                               </div>
+                              {/* Length-limit notice + continue button */}
+                              {m.notice && m.notice.includes("length limit") && (
+                                <div className="mt-2 flex items-center gap-2 text-[11px] text-amber-600">
+                                  <span>⚠️ Answer cut off</span>
+                                  <button onClick={() => send("continue")} className="px-2 py-0.5 rounded bg-amber-50 border border-amber-200 hover:bg-amber-100 transition font-medium">Continue →</button>
+                                </div>
+                              )}
                               {/* Copy + Export action bar — only on completed (non-streaming) messages */}
                               {!(streaming && i === messages.length - 1) && m.content.length > 20 && (
                                 <div className="mt-2 pt-2 border-t border-gray-100 flex items-center gap-2">
@@ -1291,6 +1409,16 @@ export default function Home() {
                   </select>
                 </div>
                 <button onClick={genSummary} disabled={generating} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-gray-300 bg-white text-gray-600 hover:bg-indigo-50 hover:text-indigo-700 disabled:opacity-40 transition font-medium" title="Structured study notes from your material"><ScrollText size={13} /> Study notes</button>
+                <button onClick={genFlashcards} disabled={generating || flashLoading} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-gray-300 bg-white text-gray-600 hover:bg-violet-50 hover:text-violet-700 disabled:opacity-40 transition font-medium" title="Flashcards from your material">🃏 {flashLoading ? "Building…" : "Flashcards"}</button>
+              </div>
+            )}
+            {/* Spaced repetition: weak topics nudge */}
+            {weakTopics.length > 0 && !isPaper && (
+              <div className="max-w-3xl mx-auto mb-2 flex items-center gap-2 text-xs bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                <span className="text-amber-700 font-medium">📚 Review needed:</span>
+                <span className="text-amber-600 truncate flex-1">{weakTopics.slice(-3).join(" · ")}</span>
+                <button onClick={() => genQuiz(weakTopics.slice(-5).join(" ; "))} disabled={generating} className="shrink-0 px-2 py-0.5 rounded bg-amber-100 border border-amber-300 text-amber-800 hover:bg-amber-200 transition text-[11px] font-medium">Practice these</button>
+                <button onClick={() => setWeakTopics([])} className="shrink-0 text-amber-400 hover:text-amber-600"><X size={12} /></button>
               </div>
             )}
 
