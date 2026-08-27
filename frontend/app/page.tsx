@@ -11,7 +11,7 @@ import {
   BookOpen, FileText, MessageSquare, Pin, Pencil, Trash2, Plus,
   Paperclip, Mic, ArrowUp, Square, Menu, Globe, Download, ListChecks, ScrollText,
   UploadCloud, X, RotateCcw, FileDown, GraduationCap, Link2, Eye, KeyRound, Copy, Check,
-  RefreshCw, Moon, Sun,
+  RefreshCw,
 } from "lucide-react";
 import { api, setToken, clearToken, AuthError, type QuizQuestion, type Source, type Usage, type Stats, type Doc, type QuotaSnapshot, type PaperLayout } from "@/lib/api";
 
@@ -308,7 +308,6 @@ export default function Home() {
   const [flashLoading, setFlashLoading] = useState(false);
   const [fcIdx, setFcIdx] = useState(0);
   const [fcFlipped, setFcFlipped] = useState(false);
-  const [darkMode, setDarkMode] = useState(false);
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [editingContent, setEditingContent] = useState("");
 
@@ -996,7 +995,7 @@ export default function Home() {
   );
 
   return (
-    <div className={`h-dvh flex bg-transparent text-gray-800 ${darkMode ? "dark" : ""}`}>
+    <div className="h-dvh flex bg-transparent text-gray-800">
       {/* ── Decorative canvas: dot grid, drifting aurora blobs, film grain ── */}
       <div aria-hidden className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
         <div className="absolute inset-0 deco-grid" />
@@ -1208,10 +1207,6 @@ export default function Home() {
               )}
             </div>
             <div className="flex items-center gap-2">
-              {/* Dark mode toggle */}
-              <button onClick={() => setDarkMode((d) => !d)} title={darkMode ? "Light mode" : "Dark mode"} className="text-gray-400 hover:text-indigo-600 p-1.5 rounded-lg hover:bg-indigo-50 transition" aria-label="Toggle dark mode">
-                {darkMode ? <Sun size={15} /> : <Moon size={15} />}
-              </button>
               {isPaper && previewMsg && (
                 <button onClick={() => setPreviewOpen(true)} className="lg:hidden text-xs px-2.5 py-1.5 rounded-lg border border-gray-300 text-gray-600 inline-flex items-center gap-1" aria-label="Open paper preview"><Eye size={13} /> Preview</button>
               )}
