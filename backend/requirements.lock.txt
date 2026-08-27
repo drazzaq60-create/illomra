@@ -1,4 +1,4 @@
-accelerate==1.13.0
+﻿accelerate==1.13.0
 aiohappyeyeballs==2.6.1
 aiohttp==3.13.5
 aiosignal==1.4.0
@@ -77,7 +77,6 @@ langchain-classic==1.0.8
 langchain-community==0.4.2
 langchain-core==1.5.5
 langchain-google-genai==4.3.4
-langchain-groq==0.1.9
 langchain-huggingface==1.2.2
 langchain-protocol==0.0.18
 langchain-text-splitters==1.1.2
