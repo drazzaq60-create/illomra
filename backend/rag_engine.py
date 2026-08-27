@@ -828,7 +828,7 @@ class RAGEngine:
         if is_short:
             return 1200, 4, ("Answer directly and concisely — a focused explanation without long "
                              "preamble or exhaustive detail. No headings for a short answer.")
-        return 2500, 6, ("Match the length to the question — concise by default; expand only where "
+        return 4000, 6, ("Match the length to the question — concise by default; expand only where "
                          "it genuinely aids understanding.")
 
     # A scoped doc-set at or under this many chunks is injected WHOLE instead of
@@ -1014,6 +1014,12 @@ class RAGEngine:
             "- Be exact. Never invent facts, numbers, names, dates, or citations. If you are not "
             "sure of something, say so plainly instead of guessing.\n"
         )
+        format_rule = (
+            "- Format your answer using Markdown: use **bold** for key terms, `code` for code/commands, "
+            "```language blocks for multi-line code, tables (| col | col |) for comparisons, and "
+            "bullet/numbered lists for steps or enumerations. Use headings (##, ###) only for "
+            "long multi-section answers. Plain prose for short answers.\n"
+        )
         search_rule = (
             "- You can use live web search: if the question genuinely needs current or external "
             "information that is neither in the material nor something you know reliably, respond "
@@ -1027,6 +1033,7 @@ class RAGEngine:
                 "How to answer:\n"
                 f"{today_line}"
                 f"- Length: {length_guidance}\n"
+                f"{format_rule}"
                 f"{understand_rule}"
                 "- Explain clearly for a beginner, in plain language, with a concrete example where it helps.\n"
                 f"{honesty_rule}"
@@ -1055,6 +1062,7 @@ class RAGEngine:
             "use only the ones relevant to the question and ignore the rest. Never repeat the "
             "[From: ...] tags in your answer; sources are shown to the student separately.\n"
             f"- Length: {length_guidance}\n"
+            f"{format_rule}"
             f"{understand_rule}"
             "- Explain clearly for a beginner, in plain language.\n"
             "- Use the conversation so far to resolve follow-ups like \"explain that more\".\n"

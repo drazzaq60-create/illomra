@@ -6,7 +6,7 @@ import remarkGfm from "remark-gfm";
 import {
   BookOpen, FileText, MessageSquare, Pin, Pencil, Trash2, Plus,
   Paperclip, Mic, ArrowUp, Square, Menu, Globe, Download, ListChecks, ScrollText,
-  UploadCloud, X, RotateCcw, FileDown, GraduationCap, Link2, Eye, KeyRound,
+  UploadCloud, X, RotateCcw, FileDown, GraduationCap, Link2, Eye, KeyRound, Copy, Check,
 } from "lucide-react";
 import { api, setToken, clearToken, AuthError, type QuizQuestion, type Source, type Usage, type Stats, type Doc, type QuotaSnapshot, type PaperLayout } from "@/lib/api";
 
@@ -88,7 +88,26 @@ const ACCENT: Record<"learn" | "papers" | "library", {
 };
 
 const MD =
-  "text-[15px] leading-relaxed text-gray-800 [&_h1]:text-lg [&_h1]:font-semibold [&_h1]:mt-3 [&_h1]:text-gray-900 [&_h2]:text-base [&_h2]:font-semibold [&_h2]:mt-3 [&_h2]:text-gray-900 [&_h3]:font-medium [&_h3]:mt-3 [&_h3]:text-gray-900 [&_p]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_ol]:my-2 [&_li]:my-1 [&_strong]:font-semibold [&_strong]:text-gray-900 [&_code]:bg-indigo-50 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-indigo-700 [&_hr]:border-gray-200 [&_hr]:my-3 [&_a]:text-indigo-600 [&_a]:underline";
+  "text-[15px] leading-relaxed text-gray-800 " +
+  "[&_h1]:text-lg [&_h1]:font-semibold [&_h1]:mt-3 [&_h1]:text-gray-900 " +
+  "[&_h2]:text-base [&_h2]:font-semibold [&_h2]:mt-3 [&_h2]:text-gray-900 " +
+  "[&_h3]:font-medium [&_h3]:mt-2 [&_h3]:text-gray-900 " +
+  "[&_p]:my-2 " +
+  "[&_ul]:list-disc [&_ul]:pl-5 [&_ul]:my-2 " +
+  "[&_ol]:list-decimal [&_ol]:pl-5 [&_ol]:my-2 " +
+  "[&_li]:my-1 " +
+  "[&_strong]:font-semibold [&_strong]:text-gray-900 " +
+  // inline code
+  "[&_code]:bg-indigo-50 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-indigo-700 [&_code]:text-[13px] [&_code]:font-mono " +
+  // fenced code blocks (pre > code)
+  "[&_pre]:bg-gray-900 [&_pre]:text-gray-100 [&_pre]:rounded-xl [&_pre]:p-4 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre]:text-[13px] [&_pre]:font-mono [&_pre>code]:bg-transparent [&_pre>code]:text-gray-100 [&_pre>code]:p-0 " +
+  // tables
+  "[&_table]:w-full [&_table]:my-3 [&_table]:border-collapse [&_table]:text-sm " +
+  "[&_th]:bg-indigo-50 [&_th]:text-indigo-800 [&_th]:font-semibold [&_th]:px-3 [&_th]:py-2 [&_th]:border [&_th]:border-indigo-200 [&_th]:text-left " +
+  "[&_td]:px-3 [&_td]:py-2 [&_td]:border [&_td]:border-gray-200 [&_td]:align-top " +
+  "[&_tr:nth-child(even)_td]:bg-gray-50/70 " +
+  "[&_hr]:border-gray-200 [&_hr]:my-3 " +
+  "[&_a]:text-indigo-600 [&_a]:underline [&_blockquote]:border-l-4 [&_blockquote]:border-indigo-300 [&_blockquote]:pl-3 [&_blockquote]:text-gray-600 [&_blockquote]:italic [&_blockquote]:my-2";
 
 // The A4 sheet preview: serif, print-like, calm.
 const SHEET_MD =
@@ -233,6 +252,7 @@ export default function Home() {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [dragOver, setDragOver] = useState(false);
+  const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
 
   const recognitionRef = useRef<{ stop: () => void; start: () => void } | null>(null);
   const voiceBaseRef = useRef("");
@@ -1162,9 +1182,37 @@ export default function Home() {
                               )}
                             </>
                           ) : (
-                            <div className={MD}>
-                              <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
-                            </div>
+                            <>
+                              <div className={MD}>
+                                <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
+                              </div>
+                              {/* Copy + Export action bar — only on completed (non-streaming) messages */}
+                              {!(streaming && i === messages.length - 1) && m.content.length > 20 && (
+                                <div className="mt-2 pt-2 border-t border-gray-100 flex items-center gap-2">
+                                  <button
+                                    onClick={() => { navigator.clipboard.writeText(m.content); setCopiedIdx(i); setTimeout(() => setCopiedIdx(null), 2000); }}
+                                    className="inline-flex items-center gap-1 text-[11px] text-gray-400 hover:text-gray-700 transition px-2 py-1 rounded hover:bg-gray-100"
+                                    title="Copy answer"
+                                  >
+                                    {copiedIdx === i ? <><Check size={11} className="text-green-500" /> Copied</> : <><Copy size={11} /> Copy</>}
+                                  </button>
+                                  <button
+                                    onClick={() => api.exportPaper(m.content, "pdf")}
+                                    className="inline-flex items-center gap-1 text-[11px] text-gray-400 hover:text-gray-700 transition px-2 py-1 rounded hover:bg-gray-100"
+                                    title="Save as PDF"
+                                  >
+                                    <FileDown size={11} /> PDF
+                                  </button>
+                                  <button
+                                    onClick={() => api.exportPaper(m.content, "docx")}
+                                    className="inline-flex items-center gap-1 text-[11px] text-gray-400 hover:text-gray-700 transition px-2 py-1 rounded hover:bg-gray-100"
+                                    title="Save as Word"
+                                  >
+                                    <Download size={11} /> Word
+                                  </button>
+                                </div>
+                              )}
+                            </>
                           )}
                           {m.web && <div className="mt-2 text-[11px] text-sky-600 inline-flex items-center gap-1"><Globe size={11} /> Searched the web</div>}
                           {m.model && quota && m.model !== quota.primary && (

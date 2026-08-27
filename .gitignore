@@ -20,3 +20,4 @@ out/
 usage_state.json
 backend/pattern_files/
 backend/convo_store.json
+backend/convo_store.json.d/
