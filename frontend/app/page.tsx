@@ -1366,20 +1366,6 @@ export default function Home() {
                                   >
                                     {copiedIdx === i ? <><Check size={11} className="text-green-500" /> Copied</> : <><Copy size={11} /> Copy</>}
                                   </button>
-                                  <button
-                                    onClick={() => api.exportPaper(m.content, "pdf")}
-                                    className="inline-flex items-center gap-1 text-[11px] text-gray-400 hover:text-gray-700 transition px-2 py-1 rounded hover:bg-gray-100"
-                                    title="Save as PDF"
-                                  >
-                                    <FileDown size={11} /> PDF
-                                  </button>
-                                  <button
-                                    onClick={() => api.exportPaper(m.content, "docx")}
-                                    className="inline-flex items-center gap-1 text-[11px] text-gray-400 hover:text-gray-700 transition px-2 py-1 rounded hover:bg-gray-100"
-                                    title="Save as Word"
-                                  >
-                                    <Download size={11} /> Word
-                                  </button>
                                 </div>
                               )}
                             </>

@@ -285,47 +285,124 @@ class _UploadShim:
         return self._data
 
 
+def _parse_inline_md(text: str):
+    """Splits text into tuples of (substring, is_bold, is_italic, is_code)."""
+    import re
+    tokens = []
+    pattern = re.compile(r'(\*\*.*?\*\*|\*.*?\*|`.*?`)')
+    parts = pattern.split(text)
+    for p in parts:
+        if not p:
+            continue
+        if p.startswith('**') and p.endswith('**'):
+            tokens.append((p[2:-2], True, False, False))
+        elif p.startswith('*') and p.endswith('*'):
+            tokens.append((p[1:-1], False, True, False))
+        elif p.startswith('`') and p.endswith('`'):
+            tokens.append((p[1:-1], False, False, True))
+        else:
+            tokens.append((p, False, False, False))
+    return tokens
+
+
+def _add_docx_p(doc, text: str, style=None, align=None, heading_level=None):
+    from docx.shared import Pt, RGBColor
+    if heading_level:
+        p = doc.add_heading('', level=heading_level)
+    elif style:
+        p = doc.add_paragraph(style=style)
+    else:
+        p = doc.add_paragraph()
+
+    if align:
+        p.alignment = align
+
+    tokens = _parse_inline_md(text)
+    for content, bold, italic, code in tokens:
+        run = p.add_run(content)
+        if bold:
+            run.bold = True
+        if italic:
+            run.italic = True
+        if code:
+            run.font.name = 'Consolas'
+            run.font.size = Pt(9.5)
+            run.font.color.rgb = RGBColor(180, 40, 40)
+    return p
+
+
 def _fill_docx(doc, text: str, layout: dict, center_rest: bool = False):
-    """Write the markdown-lite paper text into a python-docx Document."""
+    """Write formatted markdown paper text into a python-docx Document."""
+    import re
     from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.shared import Inches
     center_n = int((layout or {}).get("center_top_lines", 0) or 0)
+    lines = text.split("\n")
     line_no = 0
-    for raw in text.split("\n"):
+    i = 0
+
+    while i < len(lines):
+        raw = lines[i]
         st = raw.strip()
         if not st:
             doc.add_paragraph("")
+            i += 1
             continue
+
         line_no += 1
+        align = WD_ALIGN_PARAGRAPH.CENTER if (line_no <= center_n or center_rest) else None
+
+        # Check for Markdown Table
+        if st.startswith('|') and st.endswith('|'):
+            table_lines = []
+            while i < len(lines) and lines[i].strip().startswith('|'):
+                table_lines.append(lines[i].strip())
+                i += 1
+            rows = []
+            for t_line in table_lines:
+                cells = [c.strip() for c in t_line.strip('|').split('|')]
+                if all(re.match(r'^:?-+:?$', c) for c in cells if c):
+                    continue
+                rows.append(cells)
+            if rows:
+                col_count = max(len(r) for r in rows)
+                tbl = doc.add_table(rows=len(rows), cols=col_count)
+                tbl.style = 'Table Grid'
+                for r_idx, r_data in enumerate(rows):
+                    for c_idx, cell_text in enumerate(r_data):
+                        if c_idx < col_count:
+                            cell_p = tbl.cell(r_idx, c_idx).paragraphs[0]
+                            for content, bold, italic, code in _parse_inline_md(cell_text):
+                                run = cell_p.add_run(content)
+                                if r_idx == 0 or bold:
+                                    run.bold = True
+            continue
+
+        # Headings & Lists
         if st.startswith("### "):
-            p = doc.add_heading(st[4:], level=3)
+            _add_docx_p(doc, st[4:], heading_level=3, align=align)
         elif st.startswith("## "):
-            p = doc.add_heading(st[3:], level=2)
+            _add_docx_p(doc, st[3:], heading_level=2, align=align)
         elif st.startswith("# "):
-            p = doc.add_heading(st[2:], level=1)
-        elif st.startswith(("- ", "* ")):
-            p = doc.add_paragraph(st[2:].replace("**", ""), style="List Bullet")
+            _add_docx_p(doc, st[2:], heading_level=1, align=align)
+        elif st.startswith(("- ", "* ", "+ ")):
+            _add_docx_p(doc, st[2:], style="List Bullet", align=align)
+        elif re.match(r'^\d+\.\s+', st):
+            clean_text = re.sub(r'^\d+\.\s+', '', st)
+            _add_docx_p(doc, clean_text, style="List Number", align=align)
+        elif st.startswith("> "):
+            p = _add_docx_p(doc, st[2:], align=align)
+            p.paragraph_format.left_indent = Inches(0.4)
         else:
-            p = doc.add_paragraph(st.replace("**", ""))
-        # The sample's opening title/institute block was center-aligned — mirror it.
-        if line_no <= center_n or center_rest:
-            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            if line_no <= center_n:
-                for run in p.runs:
-                    run.bold = True
+            _add_docx_p(doc, st, align=align)
+        i += 1
 
 
 def _paper_to_bytes(text: str, fmt: str, layout: dict = None, pattern_path: str = None):
-    """Convert a markdown paper into pdf / docx / pptx bytes.
-    - pattern_path (a stored .docx sample): the export CLONES that file — its real
-      header, footer, margins, page setup, and fonts are preserved exactly.
-    - layout (from a photo sample): styles the generic export — serif font,
-      centered title block, footer text."""
+    """Convert a markdown paper into pdf / docx / pptx bytes."""
+    import re
     layout = layout or {}
     if fmt == "pdf":
-        # fpdf's core fonts are latin-1 only. Normalize common typography the
-        # model produces (em-dashes, smart quotes) to ASCII equivalents first;
-        # refuse loudly ONLY for genuinely unmappable text (e.g. Urdu) instead
-        # of silently stripping it out of the exported paper.
         text = text.translate(str.maketrans({
             "—": "-", "–": "-", "‘": "'", "’": "'",
             "“": '"', "”": '"', "…": "...", " ": " ",
@@ -334,8 +411,7 @@ def _paper_to_bytes(text: str, fmt: str, layout: dict = None, pattern_path: str 
         try:
             text.encode("latin-1")
         except UnicodeEncodeError:
-            raise ValueError("PDF export can't render Urdu or special characters yet — "
-                             "download as Word instead (full support).")
+            raise ValueError("PDF export can't render Urdu or special characters yet — download as Word instead (full support).")
         from fpdf import FPDF
         from fpdf.enums import XPos, YPos
 
@@ -354,31 +430,66 @@ def _paper_to_bytes(text: str, fmt: str, layout: dict = None, pattern_path: str 
         pdf.add_page()
         pdf.set_auto_page_break(auto=True, margin=18)
         center_n = int(layout.get("center_top_lines", 0) or 0)
+        lines = text.split("\n")
         line_no = 0
+        i = 0
 
         def _line(t, size, style="", align="L"):
             pdf.set_font(family, style, size)
             pdf.set_x(pdf.l_margin)
-            pdf.multi_cell(pdf.epw, size * 0.55, t, align=align,
+            # Strip markdown formatting symbols for clean PDF rendering
+            clean_t = t.replace("**", "").replace("*", "").replace("`", "")
+            pdf.multi_cell(pdf.epw, size * 0.55, clean_t, align=align,
                            new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
-        for raw in text.split("\n"):
+        while i < len(lines):
+            raw = lines[i]
             st = raw.strip()
             if not st:
                 pdf.ln(3)
+                i += 1
                 continue
             line_no += 1
             centered = "C" if line_no <= center_n else "L"
+
+            # Table handling in PDF
+            if st.startswith('|') and st.endswith('|'):
+                table_lines = []
+                while i < len(lines) and lines[i].strip().startswith('|'):
+                    table_lines.append(lines[i].strip())
+                    i += 1
+                rows = []
+                for t_line in table_lines:
+                    cells = [c.strip().replace("**", "") for c in t_line.strip('|').split('|')]
+                    if all(re.match(r'^:?-+:?$', c) for c in cells if c):
+                        continue
+                    rows.append(cells)
+                if rows:
+                    col_count = max(len(r) for r in rows)
+                    col_width = pdf.epw / col_count
+                    pdf.set_font(family, "B", 10)
+                    for r_idx, r_data in enumerate(rows):
+                        style = "B" if r_idx == 0 else ""
+                        pdf.set_font(family, style, 9.5)
+                        for c_idx in range(col_count):
+                            cell_val = r_data[c_idx] if c_idx < len(r_data) else ""
+                            pdf.cell(col_width, 6, cell_val[:30], border=1)
+                        pdf.ln()
+                continue
+
             if st.startswith("### "):
                 _line(st[4:], 12, "B", centered)
             elif st.startswith("## "):
                 _line(st[3:], 14, "B", centered)
             elif st.startswith("# "):
                 _line(st[2:], 16, "B", centered)
-            elif st.startswith(("- ", "* ")):
-                _line("  - " + st[2:].replace("**", ""), 11, "", centered)
+            elif st.startswith(("- ", "* ", "+ ")):
+                _line("   • " + st[2:], 11, "", centered)
+            elif re.match(r'^\d+\.\s+', st):
+                _line("   " + st, 11, "", centered)
             else:
-                _line(st.replace("**", ""), 11, "B" if line_no <= center_n else "", centered)
+                _line(st, 11, "B" if line_no <= center_n else "", centered)
+            i += 1
         return bytes(pdf.output()), "application/pdf", "pdf"
     if fmt == "docx":
         import io
@@ -411,26 +522,52 @@ def _paper_to_bytes(text: str, fmt: str, layout: dict = None, pattern_path: str 
         from pptx import Presentation
         from pptx.util import Inches, Pt
         prs = Presentation()
-        blank = prs.slide_layouts[6]
-        lines = text.split("\n")
-        groups, chunk = [], []
-        for l in lines:
-            chunk.append(l)
-            if len(chunk) >= 14:
-                groups.append(chunk); chunk = []
-        if chunk:
-            groups.append(chunk)
-        for group in groups or [[""]]:
-            slide = prs.slides.add_slide(blank)
-            tb = slide.shapes.add_textbox(Inches(0.5), Inches(0.3), Inches(9), Inches(6.5))
-            tf = tb.text_frame
+
+        # Split text into slide groups based on headings
+        slides_data = []
+        current_slide = {"title": "Presentation", "content": []}
+
+        for raw_line in text.split("\n"):
+            st = raw_line.strip()
+            if not st:
+                continue
+            if st.startswith("# ") or st.startswith("## "):
+                if current_slide["content"] or current_slide["title"] != "Presentation":
+                    slides_data.append(current_slide)
+                title_clean = st.lstrip("#").replace("**", "").strip()
+                current_slide = {"title": title_clean, "content": []}
+            else:
+                clean = st.replace("**", "").replace("*", "").strip()
+                current_slide["content"].append(clean)
+
+        if current_slide["content"] or current_slide["title"]:
+            slides_data.append(current_slide)
+
+        if not slides_data:
+            slides_data = [{"title": "Presentation", "content": [text]}]
+
+        title_layout = prs.slide_layouts[0]
+        content_layout = prs.slide_layouts[1]
+
+        # Slide 1: Title Slide
+        first_slide = prs.slides.add_slide(title_layout)
+        first_slide.shapes.title.text = slides_data[0]["title"]
+        if first_slide.placeholders[1]:
+            first_slide.placeholders[1].text = "Generated by StudyMind AI"
+
+        # Subsequent slides
+        for slide_item in slides_data[1:]:
+            slide = prs.slides.add_slide(content_layout)
+            slide.shapes.title.text = slide_item["title"]
+            tf = slide.placeholders[1].text_frame
             tf.word_wrap = True
-            for i, ln in enumerate(group):
-                clean = ln.replace("#", "").replace("**", "").strip()
-                p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
-                p.text = clean
-                p.font.size = Pt(12)
-        buf = io.BytesIO(); prs.save(buf)
+            for idx, bullet_text in enumerate(slide_item["content"][:8]):
+                p = tf.paragraphs[0] if idx == 0 else tf.add_paragraph()
+                p.text = bullet_text
+                p.font.size = Pt(14)
+
+        buf = io.BytesIO()
+        prs.save(buf)
         return buf.getvalue(), "application/vnd.openxmlformats-officedocument.presentationml.presentation", "pptx"
     raise ValueError("Unsupported format")
 
