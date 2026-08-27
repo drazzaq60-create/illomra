@@ -1208,10 +1208,6 @@ export default function Home() {
               )}
             </div>
             <div className="flex items-center gap-2">
-              {/* Regenerate last response */}
-              {!generating && messages.length >= 2 && messages[messages.length - 1].role === "assistant" && !isPaper && (
-                <button onClick={regenerate} title="Regenerate response" className="text-gray-400 hover:text-indigo-600 p-1.5 rounded-lg hover:bg-indigo-50 transition" aria-label="Regenerate"><RefreshCw size={15} /></button>
-              )}
               {/* Dark mode toggle */}
               <button onClick={() => setDarkMode((d) => !d)} title={darkMode ? "Light mode" : "Dark mode"} className="text-gray-400 hover:text-indigo-600 p-1.5 rounded-lg hover:bg-indigo-50 transition" aria-label="Toggle dark mode">
                 {darkMode ? <Sun size={15} /> : <Moon size={15} />}
@@ -1450,6 +1446,15 @@ export default function Home() {
                   </div>
                 </div>
               ))}
+
+              {/* Regenerate — appears below the last assistant message, Claude-style */}
+              {!generating && messages.length >= 2 && messages[messages.length - 1].role === "assistant" && !isPaper && (
+                <div className="flex justify-center pb-1">
+                  <button onClick={regenerate} className="inline-flex items-center gap-1.5 text-xs text-gray-400 hover:text-indigo-600 px-3 py-1.5 rounded-full border border-gray-200 hover:border-indigo-300 bg-white/70 hover:bg-indigo-50 transition">
+                    <RefreshCw size={12} /> Regenerate response
+                  </button>
+                </div>
+              )}
 
               {(thinking || quizLoading || summaryLoading) && (
                 <div className="flex justify-start">
