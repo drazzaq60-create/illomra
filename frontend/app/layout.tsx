@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter, Space_Grotesk } from "next/font/google";
 import "./globals.css";
+import "katex/dist/katex.min.css";
 
 const inter = Inter({ variable: "--font-sans", subsets: ["latin"] });
 // Display face for headings/wordmark — gives the UI a voice beyond system-default.

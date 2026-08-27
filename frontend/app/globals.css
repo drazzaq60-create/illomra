@@ -110,3 +110,40 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .deco-blob-a, .deco-blob-b, .anim-float, .anim-shimmer { animation: none; }
 }
+
+/* ── Dark mode ─────────────────────────────────────────────────────────────── */
+.dark {
+  color: #e5e7eb;
+  background-color: #0f0f13;
+  background-image:
+    radial-gradient(42rem 42rem at 8% -8%, rgba(99, 102, 241, 0.12), transparent 60%),
+    radial-gradient(38rem 38rem at 104% 10%, rgba(139, 92, 246, 0.10), transparent 60%),
+    radial-gradient(40rem 40rem at 46% 118%, rgba(16, 185, 129, 0.08), transparent 62%);
+  color-scheme: dark;
+}
+.dark .deco-grid {
+  background-image: radial-gradient(circle, rgba(99, 102, 241, 0.08) 1px, transparent 1px);
+}
+/* Sidebar */
+.dark aside { background: rgba(15,15,20,0.92) !important; border-color: rgba(255,255,255,0.06) !important; }
+/* Message bubbles */
+.dark .bg-white\/85 { background: rgba(30,30,40,0.9) !important; border-color: rgba(255,255,255,0.08) !important; }
+.dark .bg-white\/80 { background: rgba(25,25,35,0.9) !important; }
+.dark .bg-white\/45 { background: rgba(15,15,20,0.75) !important; }
+.dark .bg-white\/60 { background: rgba(20,20,28,0.7) !important; }
+.dark .bg-white\/70 { background: rgba(22,22,32,0.8) !important; }
+.dark .bg-white\/90 { background: rgba(30,30,42,0.95) !important; }
+.dark .text-gray-800 { color: #d1d5db !important; }
+.dark .text-gray-700 { color: #9ca3af !important; }
+.dark .text-gray-600 { color: #9ca3af !important; }
+.dark .text-gray-500 { color: #6b7280 !important; }
+.dark .text-gray-900 { color: #f3f4f6 !important; }
+.dark .border-gray-200 { border-color: rgba(255,255,255,0.08) !important; }
+.dark .border-gray-100 { border-color: rgba(255,255,255,0.06) !important; }
+.dark .border-white\/60 { border-color: rgba(255,255,255,0.06) !important; }
+.dark .border-white\/80 { border-color: rgba(255,255,255,0.07) !important; }
+.dark .bg-gray-50 { background: rgba(30,30,40,0.6) !important; }
+.dark .bg-gray-100 { background: rgba(40,40,55,0.7) !important; }
+.dark .bg-indigo-50 { background: rgba(79,70,229,0.12) !important; }
+.dark ::-webkit-scrollbar-thumb { background: #374151; }
+.dark input, .dark textarea, .dark select { background: rgba(25,25,35,0.8) !important; color: #d1d5db !important; border-color: rgba(255,255,255,0.12) !important; }

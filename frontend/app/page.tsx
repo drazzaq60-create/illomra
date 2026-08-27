@@ -3,10 +3,15 @@
 import { useEffect, useRef, useState, type ChangeEvent, type DragEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import SyntaxHighlighter from "react-syntax-highlighter";
+import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import {
   BookOpen, FileText, MessageSquare, Pin, Pencil, Trash2, Plus,
   Paperclip, Mic, ArrowUp, Square, Menu, Globe, Download, ListChecks, ScrollText,
   UploadCloud, X, RotateCcw, FileDown, GraduationCap, Link2, Eye, KeyRound, Copy, Check,
+  RefreshCw, Moon, Sun,
 } from "lucide-react";
 import { api, setToken, clearToken, AuthError, type QuizQuestion, type Source, type Usage, type Stats, type Doc, type QuotaSnapshot, type PaperLayout } from "@/lib/api";
 
@@ -303,6 +308,9 @@ export default function Home() {
   const [flashLoading, setFlashLoading] = useState(false);
   const [fcIdx, setFcIdx] = useState(0);
   const [fcFlipped, setFcFlipped] = useState(false);
+  const [darkMode, setDarkMode] = useState(false);
+  const [editingIdx, setEditingIdx] = useState<number | null>(null);
+  const [editingContent, setEditingContent] = useState("");
 
   const recognitionRef = useRef<{ stop: () => void; start: () => void } | null>(null);
   const voiceBaseRef = useRef("");
@@ -749,6 +757,35 @@ export default function Home() {
     abortRef.current?.abort();
   }
 
+  function regenerate() {
+    if (generating) return;
+    const msgs = [...messages];
+    // Remove trailing assistant messages, find last user message.
+    while (msgs.length && msgs[msgs.length - 1].role === "assistant") msgs.pop();
+    const lastUser = msgs[msgs.length - 1];
+    if (!lastUser || lastUser.role !== "user") return;
+    msgs.pop(); // remove the user message too — send() will re-add it
+    setMessages(() => msgs);
+    send(lastUser.content);
+  }
+
+  function startEditMessage(idx: number, content: string) {
+    setEditingIdx(idx);
+    setEditingContent(content);
+  }
+
+  function commitEdit() {
+    if (editingIdx === null) return;
+    const newContent = editingContent.trim();
+    if (!newContent) { setEditingIdx(null); return; }
+    // Truncate messages up to (not including) the edited message, then re-send.
+    const truncated = messages.slice(0, editingIdx);
+    setMessages(() => truncated);
+    setEditingIdx(null);
+    setEditingContent("");
+    send(newContent);
+  }
+
   async function genSummary() {
     if (thinking || streaming || summaryLoading) return;
     setSummaryLoading(true);
@@ -959,7 +996,7 @@ export default function Home() {
   );
 
   return (
-    <div className="h-dvh flex bg-transparent text-gray-800">
+    <div className={`h-dvh flex bg-transparent text-gray-800 ${darkMode ? "dark" : ""}`}>
       {/* ── Decorative canvas: dot grid, drifting aurora blobs, film grain ── */}
       <div aria-hidden className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
         <div className="absolute inset-0 deco-grid" />
@@ -1171,6 +1208,14 @@ export default function Home() {
               )}
             </div>
             <div className="flex items-center gap-2">
+              {/* Regenerate last response */}
+              {!generating && messages.length >= 2 && messages[messages.length - 1].role === "assistant" && !isPaper && (
+                <button onClick={regenerate} title="Regenerate response" className="text-gray-400 hover:text-indigo-600 p-1.5 rounded-lg hover:bg-indigo-50 transition" aria-label="Regenerate"><RefreshCw size={15} /></button>
+              )}
+              {/* Dark mode toggle */}
+              <button onClick={() => setDarkMode((d) => !d)} title={darkMode ? "Light mode" : "Dark mode"} className="text-gray-400 hover:text-indigo-600 p-1.5 rounded-lg hover:bg-indigo-50 transition" aria-label="Toggle dark mode">
+                {darkMode ? <Sun size={15} /> : <Moon size={15} />}
+              </button>
               {isPaper && previewMsg && (
                 <button onClick={() => setPreviewOpen(true)} className="lg:hidden text-xs px-2.5 py-1.5 rounded-lg border border-gray-300 text-gray-600 inline-flex items-center gap-1" aria-label="Open paper preview"><Eye size={13} /> Preview</button>
               )}
@@ -1261,7 +1306,7 @@ export default function Home() {
               {messages.map((m, i) => (
                 <div key={i} className={`anim-fade-up ${m.role === "user" ? "flex justify-end" : "flex justify-start gap-2.5"}`}>
                   {m.role === "assistant" && <div className="shrink-0 mt-1.5 hidden sm:block"><Logo size={24} /></div>}
-                  <div className={m.role === "user" ? "max-w-[85%] rounded-2xl rounded-br-md bg-gradient-to-br from-indigo-600 to-violet-600 text-white px-4 py-2.5 text-[15px] whitespace-pre-wrap shadow-md shadow-indigo-100" : "max-w-full flex-1 min-w-0"}>
+                  <div className={m.role === "user" ? "flex justify-end" : "max-w-full flex-1 min-w-0"}>
                     {m.role === "assistant" ? (
                       m.type === "paper" && m.content.length > 80 && !(streaming && i === messages.length - 1) ? (
                         /* Papers render compactly in the thread — the real thing lives in the A4 preview */
@@ -1295,7 +1340,23 @@ export default function Home() {
                           ) : (
                             <>
                               <div className={MD}>
-                                <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
+                                <ReactMarkdown
+                                  remarkPlugins={[remarkGfm, remarkMath]}
+                                  rehypePlugins={[rehypeKatex]}
+                                  components={{
+                                    code({ className, children }) {
+                                      const lang = /language-(\w+)/.exec(className || "")?.[1];
+                                      const isBlock = String(children).includes("\n");
+                                      return lang || isBlock ? (
+                                        <SyntaxHighlighter style={oneDark} language={lang || "text"} PreTag="div" customStyle={{ borderRadius: "12px", fontSize: "13px", margin: "8px 0" }}>
+                                          {String(children).replace(/\n$/, "")}
+                                        </SyntaxHighlighter>
+                                      ) : (
+                                        <code className={className}>{children}</code>
+                                      );
+                                    }
+                                  }}
+                                >{m.content}</ReactMarkdown>
                               </div>
                               {/* Length-limit notice + continue button */}
                               {m.notice && m.notice.includes("length limit") && (
@@ -1359,7 +1420,32 @@ export default function Home() {
                         </div>
                       )
                     ) : (
-                      m.content
+                      /* User message — with edit support */
+                      editingIdx === i ? (
+                        <div className="flex flex-col gap-2 max-w-[85%]">
+                          <textarea
+                            autoFocus
+                            value={editingContent}
+                            onChange={(e) => setEditingContent(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); commitEdit(); } if (e.key === "Escape") setEditingIdx(null); }}
+                            className="w-full rounded-xl border border-indigo-400 bg-white text-gray-900 px-3 py-2 text-[15px] outline-none resize-none min-h-[60px]"
+                            rows={Math.min(8, editingContent.split("\n").length + 1)}
+                          />
+                          <div className="flex gap-2 justify-end">
+                            <button onClick={() => setEditingIdx(null)} className="text-xs px-3 py-1.5 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50">Cancel</button>
+                            <button onClick={commitEdit} className="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-500">Send</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="group relative max-w-[85%] rounded-2xl rounded-br-md bg-gradient-to-br from-indigo-600 to-violet-600 text-white px-4 py-2.5 text-[15px] whitespace-pre-wrap shadow-md shadow-indigo-100">
+                          {m.content}
+                          {!generating && (
+                            <button onClick={() => startEditMessage(i, m.content)} title="Edit message" className="absolute -top-2 -right-2 opacity-0 group-hover:opacity-100 transition bg-white text-gray-500 hover:text-indigo-700 rounded-full p-1 shadow-sm border border-gray-200">
+                              <Pencil size={11} />
+                            </button>
+                          )}
+                        </div>
+                      )
                     )}
                   </div>
                 </div>
