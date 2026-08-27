@@ -7,8 +7,8 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Install deps first so Docker caches this layer between code changes.
-COPY requirements.lock.txt requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.lock.txt
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Pre-download the embedding model at BUILD time so cold starts don't depend
 # on huggingface.co being reachable (and don't add 30-60s to first boot).
