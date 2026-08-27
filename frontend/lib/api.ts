@@ -1,7 +1,7 @@
 // lib/api.ts — the single place the frontend talks to the FastAPI backend.
 // Every function here maps to one endpoint in backend/api.py.
 
-const BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const BASE = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/^﻿/, "");
 
 // Access token for deployed instances (matches backend APP_ACCESS_TOKEN).
 // Priority: what the user typed into the lock screen (localStorage) > build-time env.
