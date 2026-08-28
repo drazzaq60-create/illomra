@@ -697,13 +697,13 @@ export default function Home() {
               setMessages((m) => [...m, { role: "assistant", content: tok, type: msgType }]);
               return;
             }
-            // Batch the rest: collect tokens, paint at most ~12x/second.
+            // Batch the rest: collect tokens, paint at most ~50x/second.
             pendingTokensRef.current += tok;
             if (flushTimerRef.current == null) {
               flushTimerRef.current = window.setTimeout(() => {
                 flushTimerRef.current = null;
                 appendPending();
-              }, 80);
+              }, 20);
             }
           },
           onNotice: (note) => { setThinkingNote(note); thinkingNoteRef.current = note; },
@@ -1447,7 +1447,7 @@ export default function Home() {
                     </span>
                     {quizLoading && <span className="text-xs">Building your quiz from {effectiveScope ? shortName(effectiveScope) : "your material"}…</span>}
                     {summaryLoading && <span className="text-xs">Writing study notes from {effectiveScope ? shortName(effectiveScope) : "your material"}…</span>}
-                    {thinkingNote && <span className="text-xs text-amber-600">{thinkingNote}</span>}
+                    {thinking && <span className="text-xs font-medium text-indigo-600">{thinkingNote || "🧠 Thinking…"}</span>}
                   </div>
                 </div>
               )}

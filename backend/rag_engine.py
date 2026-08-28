@@ -1121,10 +1121,11 @@ class RAGEngine:
         start = time.time()
         # Tell the UI up front when an explicit search phrase will trigger the web
         # (the agentic path announces itself; this path should too).
+        yield {"notice": "🧠 Thinking…"}
         if not (pattern and pattern.strip()):
             wq0 = self._decide_web_search(question)
             if wq0:
-                yield {"notice": f"🌐 Searching the web: {wq0[:70]}"}
+                yield {"notice": f"🌐 Searching the web for: {wq0[:60]}…"}
         prompt_text, sources, confidence, web_used, max_tokens = self._prepare(
             question, history, source, pattern, paper_opts, ref_sources=ref_sources, owner=owner
         )
@@ -1217,10 +1218,12 @@ class RAGEngine:
                     continue
                 raise last_err or Exception(self.ALL_LIMITED_MSG)
             if search_query:
-                yield {"notice": f"🌐 Searching the web: {search_query[:70]}"}
+                yield {"notice": f"🌐 Searching the web for: {search_query[:60]}…"}
                 results = self.web_search(search_query, n=5)
                 if not results:
-                    yield {"notice": "🌐 Web search found nothing — answering from what I know"}
+                    yield {"notice": "🌐 Nothing found — answering from what I know…"}
+                else:
+                    yield {"notice": f"📖 Reading {len(results)} result{'s' if len(results) != 1 else ''}…"}
                 prompt_text, sources, confidence, web_used, max_tokens = self._prepare(
                     question, history, source, pattern, paper_opts,
                     web_override=results or [], ref_sources=ref_sources, owner=owner
