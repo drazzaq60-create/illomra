@@ -793,43 +793,10 @@ class RAGEngine:
         return base_k
 
     def _response_tier(self, question: str, pattern: str):
-        """Match answer length + retrieval width to the task, so small questions stay fast
-        and 'explain in detail' still gets the long treatment.
+        """Always give the LLM maximum freedom — let it decide length and depth.
         Returns (max_output_tokens, retrieval_k, length_guidance)."""
-        if pattern and pattern.strip():
-            return 8000, 6, "Produce the FULL document the teacher asked for."
-        # Building question sets / papers / quizzes needs the full output budget —
-        # a 2500-token cap cut 10-mark answer outlines off mid-formula.
-        if self._is_generative(question):
-            return 8000, 8, ("Produce the COMPLETE set the student asked for — every question, every "
-                             "answer — never stop partway through an item.")
-        ql = question.lower().strip()
-        n_words = len(ql.split())
-        # Explicit multi-word phrases → low false-positive, safe to match anywhere.
-        long_signals = ("explain everything", "explain the whole", "explain the entire",
-                        "overview", "comprehensive", "in detail", "detailed", "elaborate",
-                        "step by step", "in depth", "thoroughly", "everything about",
-                        "full derivation", "essay", "long answer", "walk me through")
-        brevity_signals = ("briefly", "in short", "in one line", "one line", "short answer",
-                           "tl;dr", "quickly", "in a sentence")
-        # Question-word openers → only trust them at the START (so "when" mid-sentence
-        # in a complex question doesn't wrongly mark it short).
-        short_starts = ("what is", "what are", "what does", "define", "definition of",
-                        "who is", "who are", "when ", "where ", "which ", "name the",
-                        "list ", "is ", "are ", "does ", "do ", "can ")
-        if any(s in ql for s in long_signals):
-            return 8000, 8, ("Be thorough and well-structured — cover the main concepts with "
-                             "short headings, bullet points, and concrete examples.")
-        is_short = (
-            any(s in ql for s in brevity_signals)
-            or n_words <= 6
-            or (any(ql.startswith(s) for s in short_starts) and n_words <= 12)
-        )
-        if is_short:
-            return 1200, 4, ("Answer directly and concisely — a focused explanation without long "
-                             "preamble or exhaustive detail. No headings for a short answer.")
-        return 4000, 6, ("Match the length to the question — concise by default; expand only where "
-                         "it genuinely aids understanding.")
+        k = 8 if (pattern and pattern.strip()) or self._is_generative(question) else 6
+        return 8000, k, ""
 
     # A scoped doc-set at or under this many chunks is injected WHOLE instead of
     # similarity-searched. Kills the "title-chunk-only retrieval" failure where a
