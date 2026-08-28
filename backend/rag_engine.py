@@ -1146,6 +1146,7 @@ class RAGEngine:
                     _acquire_llm_slot()
                     buffer = ""
                     checking = allow_search  # buffer the start of the stream to catch the marker
+                    yield {"ping": True}  # keepalive so Railway proxy doesn't drop idle connection
                     try:
                         for chunk in self._get_llm(model, max_tokens).stream([HumanMessage(content=prompt_text)]):
                             txt = self._content_text(getattr(chunk, "content", ""))
