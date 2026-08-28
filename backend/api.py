@@ -650,7 +650,11 @@ def chat_stream(body: ChatIn, owner: "str | None" = Depends(current_owner)):
             yield json.dumps({"done": True, "error": _friendly(e),
                               "sources": [], "confidence": 0, "usage": {}}) + "\n"
 
-    return StreamingResponse(gen(), media_type="application/x-ndjson")
+    return StreamingResponse(gen(), media_type="application/x-ndjson", headers={
+        "X-Accel-Buffering": "no",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+    })
 
 
 @router.post("/quiz")
