@@ -995,7 +995,7 @@ export default function Home() {
   );
 
   return (
-    <div className="h-dvh flex bg-transparent text-gray-800">
+    <div className="h-dvh flex bg-transparent text-gray-800 overflow-x-hidden">
       {/* ── Decorative canvas: dot grid, drifting aurora blobs, film grain ── */}
       <div aria-hidden className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
         <div className="absolute inset-0 deco-grid" />
@@ -1041,8 +1041,8 @@ export default function Home() {
         </div>
       )}
 
-      {/* ── Labeled rail (frosted glass) ── */}
-      <nav className="w-[76px] shrink-0 flex flex-col items-center border-r border-white/60 bg-white/55 backdrop-blur-xl py-3 gap-1.5 z-40">
+      {/* ── Labeled rail (frosted glass) — hidden on phones; nav folds into the drawer ── */}
+      <nav className="hidden md:flex w-[76px] shrink-0 flex-col items-center border-r border-white/60 bg-white/55 backdrop-blur-xl py-3 gap-1.5 z-40">
         <button onClick={newChat} title="Illomra — home" aria-label="Home" className="mb-2 transition hover:scale-105 active:scale-95"><Logo size={36} /></button>
         {railBtn("learn", <GraduationCap size={19} />, "Learn", "Learn — your materials and chats about them")}
         {railBtn("papers", <FileText size={19} />, "Papers", "Paper Studio — generate exam papers")}
@@ -1071,7 +1071,16 @@ export default function Home() {
       </nav>
 
       {/* ── Contextual panel ── */}
-      <aside className={`${sidebarOpen ? "flex" : "hidden"} md:flex w-[262px] shrink-0 flex-col border-r border-white/60 bg-white/55 backdrop-blur-xl fixed md:static left-[76px] z-30 h-full`}>
+      <aside className={`${sidebarOpen ? "flex" : "hidden"} md:flex w-[86vw] max-w-[300px] md:w-[262px] shrink-0 flex-col border-r border-white/60 bg-white/80 md:bg-white/55 backdrop-blur-xl fixed md:static left-0 top-0 z-30 h-full`}>
+        {/* Mobile-only: brand + close + space switcher (the rail is hidden on phones) */}
+        <div className="md:hidden flex items-center justify-between px-3 pt-3 pb-2 border-b border-white/60">
+          <span className="inline-flex items-center gap-2"><Logo size={26} /><span className="font-display font-semibold text-gray-900">Illomra</span></span>
+          <button onClick={() => setSidebarOpen(false)} className="p-1.5 -mr-1 text-gray-500" aria-label="Close menu"><X size={20} /></button>
+        </div>
+        <div className="md:hidden px-3 py-2 flex gap-1.5 border-b border-white/60">
+          <button onClick={() => setNav("learn")} className={`flex-1 inline-flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-medium transition ${nav === "learn" ? `${ACCENT.learn.solid} text-white shadow-sm` : "bg-white/70 text-gray-600 border border-gray-200"}`}><GraduationCap size={15} /> Learn</button>
+          <button onClick={() => setNav("papers")} className={`flex-1 inline-flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-medium transition ${nav === "papers" ? `${ACCENT.papers.solid} text-white shadow-sm` : "bg-white/70 text-gray-600 border border-gray-200"}`}><FileText size={15} /> Papers</button>
+        </div>
         <div className={`p-3 flex items-center justify-between border-b ${nav === "papers" ? `${ACCENT.papers.softBorder} ${ACCENT.papers.panelTint}` : `${ACCENT.learn.softBorder} ${ACCENT.learn.panelTint}`}`}>
           <div>
             <div className={`font-display font-semibold text-[15px] inline-flex items-center gap-1.5 ${nav === "papers" ? ACCENT.papers.text : ACCENT.learn.text}`}>
@@ -1186,6 +1195,19 @@ export default function Home() {
             <span>ctx {fmtNum(usage.input_tokens)}/1M ({ctxPct < 1 ? "<1" : Math.round(ctxPct)}%)</span>
           </div>
         )}
+        {/* Mobile-only account row (Export + Sign out live in the hidden rail on desktop) */}
+        <div className="md:hidden border-t border-white/60 px-3 py-2.5 flex items-center justify-between">
+          <button onClick={exportChats} className="inline-flex items-center gap-1.5 text-xs text-gray-500 hover:text-indigo-600 transition"><FileDown size={14} /> Export chats</button>
+          {authMode === "google" && profile && (
+            <button onClick={signOut} className="inline-flex items-center gap-1.5 text-xs text-gray-500 hover:text-red-500 transition">
+              {profile.picture ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={profile.picture} alt="" referrerPolicy="no-referrer" className="h-5 w-5 rounded-full" />
+              ) : null}
+              Sign out
+            </button>
+          )}
+        </div>
       </aside>
 
       {sidebarOpen && <div className="fixed inset-0 bg-black/30 z-20 md:hidden" onClick={() => setSidebarOpen(false)} />}
@@ -1196,7 +1218,8 @@ export default function Home() {
         <div className={`flex flex-col min-w-0 ${isPaper && previewMsg ? "flex-1 lg:max-w-[52%]" : "flex-1"}`}>
           <header className="h-14 shrink-0 border-b border-white/60 bg-white/45 backdrop-blur-xl flex items-center justify-between px-4 gap-3">
             <div className="flex items-center gap-2 min-w-0">
-              <button onClick={() => setSidebarOpen(true)} className="md:hidden text-gray-500 p-1.5" aria-label="Menu"><Menu size={20} /></button>
+              <button onClick={() => setSidebarOpen(true)} className="md:hidden text-gray-500 p-1.5 -ml-1" aria-label="Open menu"><Menu size={22} /></button>
+              <span className="md:hidden shrink-0"><Logo size={26} /></span>
               <span className="truncate font-display font-medium text-gray-900">{current?.title || "New chat"}</span>
               {isPaper ? (
                 <span className="shrink-0 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-violet-600 text-white">Paper</span>
