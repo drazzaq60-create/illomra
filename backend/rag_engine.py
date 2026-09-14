@@ -34,7 +34,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain_core.messages import HumanMessage
 from langchain_core.documents import Document
 
@@ -79,6 +79,19 @@ PERSIST_DIR = os.getenv(
     "PERSIST_DIR",
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "chroma_db"),
 )
+
+# --- Embeddings ---------------------------------------------------------------
+# Turning each chunk into a vector is the slow part of indexing. Two backends:
+#   google — offloads embedding to Google's API; fast even on a tiny CPU host and
+#            never loads torch/sentence-transformers into memory. Default when a
+#            GOOGLE_API_KEY is present.
+#   local  — sentence-transformers MiniLM on CPU; free & offline, but slow to
+#            index and heavy to install.
+# The two produce different-sized vectors (Gemini 3072-dim vs MiniLM 384-dim), so
+# each backend uses its OWN Chroma collection — switching never corrupts the
+# other's store (you just re-index your materials once after switching).
+EMBEDDING_PROVIDER = os.getenv("EMBEDDING_PROVIDER", "auto").strip().lower()
+GEMINI_EMBED_MODEL = os.getenv("GEMINI_EMBED_MODEL", "models/gemini-embedding-001").strip()
 
 # --- Retrieval tuning ---------------------------------------------------------
 # Chunks are kept small so they fit MiniLM's 256-token window (a 1000-char chunk
@@ -332,11 +345,11 @@ class RAGEngine:
         self.total_output_tokens = 0
         self._llm_cache: Dict[int, Any] = {}
 
-        # Free local embeddings (sentence-transformers, runs on CPU).
-        self.embeddings = HuggingFaceEmbeddings(
-            model_name="sentence-transformers/all-MiniLM-L6-v2",
-            model_kwargs={"device": "cpu"},
-        )
+        # Embeddings: Google API by default (fast on a CPU host), local MiniLM as
+        # an offline fallback. Each backend gets its own Chroma collection because
+        # their vector sizes differ and must not share a store.
+        self.embeddings, self.embed_provider, self._collection_name = self._make_embeddings()
+        log.info("Embeddings: %s (collection=%s)", self.embed_provider, self._collection_name)
 
         self.splitter = RecursiveCharacterTextSplitter(
             chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP
@@ -344,6 +357,34 @@ class RAGEngine:
 
         if os.path.exists(PERSIST_DIR):
             self._reload_store()
+
+    # ---- Embeddings ---------------------------------------------------------
+    def _make_embeddings(self):
+        """Choose the embedding backend and the Chroma collection it writes to.
+
+        Returns (embeddings, provider, collection_name). Google is picked when a
+        key is available (default) — fast, API-side, no torch load. Local MiniLM
+        is the offline fallback. Each provider owns a distinct collection so their
+        different-sized vectors never end up in the same store.
+        """
+        provider = EMBEDDING_PROVIDER
+        key = self.api_key or os.getenv("GOOGLE_API_KEY", "").strip()
+        if provider == "auto":
+            provider = "google" if key else "local"
+
+        if provider == "google":
+            if not key:
+                raise RuntimeError("EMBEDDING_PROVIDER=google requires GOOGLE_API_KEY to be set.")
+            emb = GoogleGenerativeAIEmbeddings(model=GEMINI_EMBED_MODEL, google_api_key=key)
+            return emb, "google", "illomra_gemini_embed"
+
+        # Local: sentence-transformers MiniLM on CPU. "langchain" is the historical
+        # default collection name, kept so any existing local store still loads.
+        emb = HuggingFaceEmbeddings(
+            model_name="sentence-transformers/all-MiniLM-L6-v2",
+            model_kwargs={"device": "cpu"},
+        )
+        return emb, "local", "langchain"
 
     # ---- LLM ----------------------------------------------------------------
     def _get_llm(self, model: str, max_tokens: int = 8000):
@@ -434,6 +475,7 @@ class RAGEngine:
             self.vector_store = Chroma(
                 persist_directory=PERSIST_DIR,
                 embedding_function=self.embeddings,
+                collection_name=self._collection_name,
                 collection_metadata={"hnsw:space": "cosine"},
             )
             counts: Dict[str, int] = {}
@@ -513,6 +555,7 @@ class RAGEngine:
                     chunks,
                     self.embeddings,
                     persist_directory=PERSIST_DIR,
+                    collection_name=self._collection_name,
                     collection_metadata={"hnsw:space": "cosine"},
                 )
             else:
