@@ -1376,9 +1376,30 @@ class RAGEngine:
                     metas = got.get("metadatas") or []
                     all_docs = [Document(page_content=t, metadata=m or {})
                                 for t, m in zip(texts, metas) if t]
-                    if all_docs:
+                    if all_docs and source:
+                        # Single document: stride evenly across it.
                         stride = max(1, len(all_docs) // k)
                         docs = all_docs[::stride][:k]
+                    elif all_docs:
+                        # All materials: sample evenly from EACH source so every
+                        # document is represented. A single global stride can skip
+                        # a whole document (especially a small one), which is why a
+                        # combined summary could silently omit an uploaded lecture.
+                        by_src: Dict[str, List[Document]] = {}
+                        for d in all_docs:
+                            by_src.setdefault(d.metadata.get("source", "?"), []).append(d)
+                        per = max(1, k // len(by_src))
+                        picks = []
+                        for sdocs in by_src.values():
+                            stride = max(1, len(sdocs) // per)
+                            picks.append(sdocs[::stride][:per])
+                        # Round-robin interleave so the ~12k char cap (below) trims
+                        # fairly across documents instead of dropping the last one.
+                        docs = []
+                        for i in range(max(len(p) for p in picks)):
+                            for p in picks:
+                                if i < len(p):
+                                    docs.append(p[i])
                 except Exception:
                     log.exception("Stride sampling failed — falling back to similarity search")
                     docs = []
