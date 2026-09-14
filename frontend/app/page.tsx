@@ -1110,9 +1110,10 @@ export default function Home() {
                   <div className="text-[10px] text-gray-400 mt-0.5">PDF · Word · PPT · photo of notes</div>
                 </label>
                 <div className="flex gap-1">
-                  <input value={url} onChange={(e) => setUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") handleUrl(); }} placeholder="Paste a link or YouTube URL" disabled={!!busy} className="flex-1 rounded-lg bg-white/80 border border-emerald-200 outline-none px-2 py-1.5 text-xs placeholder:text-gray-400 focus:border-emerald-400" />
+                  <input value={url} onChange={(e) => setUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") handleUrl(); }} placeholder="Paste a web link or YouTube URL" disabled={!!busy} className="flex-1 rounded-lg bg-white/80 border border-emerald-200 outline-none px-2 py-1.5 text-xs placeholder:text-gray-400 focus:border-emerald-400" />
                   <button onClick={handleUrl} disabled={!!busy || !url.trim()} className="px-2 rounded-lg bg-emerald-600 text-white text-xs hover:bg-emerald-500 disabled:opacity-40" aria-label="Add link"><Link2 size={13} /></button>
                 </div>
+                <div className="text-[10px] text-gray-400 leading-snug">Web pages work best. For a YouTube video, if it can&apos;t be read, upload its transcript as a .txt file instead.</div>
               </div>
             )}
             {busy && <div className="text-[11px] text-emerald-700 animate-pulse mb-1">{busy}</div>}
