@@ -38,9 +38,40 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage
 from langchain_core.documents import Document
 
-from youtube_transcript_api import YouTubeTranscriptApi
+from youtube_transcript_api import (
+    YouTubeTranscriptApi,
+    TranscriptsDisabled,
+    NoTranscriptFound,
+    VideoUnavailable,
+    RequestBlocked,
+    IpBlocked,
+)
+from youtube_transcript_api.proxies import GenericProxyConfig, WebshareProxyConfig
 
 log = logging.getLogger("studymind")
+
+
+def _youtube_proxy_config():
+    """Optional proxy for YouTube transcript fetches.
+
+    YouTube blocks transcript requests coming from datacenter IPs (Railway, AWS,
+    GCP …), so a direct fetch fails on our cloud host even though it works from a
+    home/office connection. Routing through a residential/rotating proxy fixes it.
+    Configured entirely via env vars — with none set we fetch directly.
+
+      Webshare (recommended):  YT_WEBSHARE_USERNAME + YT_WEBSHARE_PASSWORD
+      Any HTTP proxy:          YT_PROXY_HTTP and/or YT_PROXY_HTTPS
+                               (e.g. http://user:pass@host:port)
+    """
+    ws_user = os.getenv("YT_WEBSHARE_USERNAME", "").strip()
+    ws_pass = os.getenv("YT_WEBSHARE_PASSWORD", "").strip()
+    if ws_user and ws_pass:
+        return WebshareProxyConfig(proxy_username=ws_user, proxy_password=ws_pass)
+    http_url = os.getenv("YT_PROXY_HTTP", "").strip()
+    https_url = os.getenv("YT_PROXY_HTTPS", "").strip()
+    if http_url or https_url:
+        return GenericProxyConfig(http_url=http_url or https_url, https_url=https_url or http_url)
+    return None
 
 # Where the Chroma store lives. Defaults to a folder NEXT TO THIS FILE (not the
 # CWD) so it works no matter which directory uvicorn is launched from.
@@ -640,8 +671,35 @@ class RAGEngine:
         video_id = extract_video_id(url)
         if not video_id:
             raise ValueError("Could not extract a valid 11-character video ID from YouTube link.")
+        proxy_config = _youtube_proxy_config()
+        api = YouTubeTranscriptApi(proxy_config=proxy_config) if proxy_config else YouTubeTranscriptApi()
         try:
-            transcript_list = YouTubeTranscriptApi().fetch(video_id)
+            transcript_list = api.fetch(video_id)
+        # ValueError messages below are shown to the user verbatim (see api.py /link),
+        # so keep them plain-English and actionable.
+        except (RequestBlocked, IpBlocked):
+            log.warning("YouTube blocked transcript fetch for %s (proxy=%s)", video_id, bool(proxy_config))
+            if proxy_config:
+                raise ValueError(
+                    "YouTube is still blocking the request even through the configured proxy. "
+                    "Try a different proxy, or download the video's transcript and upload it as a file."
+                )
+            raise ValueError(
+                "YouTube blocks transcript requests coming from this server. "
+                "Open the video → ⋯ More → Show transcript, copy it into a .txt file, and upload that instead. "
+                "(To enable YouTube links directly, the admin can set a proxy — see YT_WEBSHARE_USERNAME.)"
+            )
+        except TranscriptsDisabled:
+            raise ValueError(
+                "This video has captions turned off, so there's no transcript to read. "
+                "Upload the transcript as a file instead."
+            )
+        except NoTranscriptFound:
+            raise ValueError(
+                "No transcript is available for this video. Upload the transcript as a file instead."
+            )
+        except VideoUnavailable:
+            raise ValueError("That video is unavailable (private, deleted, or region-locked). Check the link.")
         except Exception as e:
             log.exception("YouTube transcript fetch failed for video %s", video_id)
             raise Exception(f"Failed to fetch YouTube transcript: {e}")
