@@ -303,6 +303,7 @@ export default function Home() {
   const [renameValue, setRenameValue] = useState("");
   const [dragOver, setDragOver] = useState(false);
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
+  const [dl, setDl] = useState<string>(""); // "<msgIndex>:<format>" while a chat answer is exporting
   const [sidebarSearch, setSidebarSearch] = useState("");
   const [weakTopics, setWeakTopics] = useState<string[]>([]);
   const [flashLoading, setFlashLoading] = useState(false);
@@ -875,6 +876,28 @@ export default function Home() {
     }
   }
 
+  // Name the downloaded file after the document's own title (first heading/line).
+  function docFilename(md: string): string {
+    const first = md.split("\n").map((l) => l.trim()).find((l) => l.replace(/^#+\s*/, "").length > 2);
+    const base = (first || "illomra-document").replace(/^#+\s*/, "").replace(/[*`_>#]/g, "").trim();
+    return base.slice(0, 50) || "illomra-document";
+  }
+
+  // Export any chat answer to a real file (PDF / Word / PPTX) the user downloads —
+  // the AI already wrote the content; this just converts it to the chosen format.
+  async function downloadMessage(content: string, fmt: string, idx: number) {
+    if (dl) return;
+    setDl(`${idx}:${fmt}`);
+    try {
+      await api.exportPaper(content, fmt, "", undefined, docFilename(content));
+    } catch (err) {
+      flashError(err instanceof Error ? err.message
+        : "Download failed — if PDF has special characters/Urdu, try Word instead.");
+    } finally {
+      setDl("");
+    }
+  }
+
   function toggleVoice() {
     const w = window as unknown as { SpeechRecognition?: new () => never; webkitSpeechRecognition?: new () => never };
     const SR = w.SpeechRecognition || w.webkitSpeechRecognition;
@@ -1380,9 +1403,9 @@ export default function Home() {
                                   <button onClick={() => send("continue")} className="px-2 py-0.5 rounded bg-amber-50 border border-amber-200 hover:bg-amber-100 transition font-medium">Continue →</button>
                                 </div>
                               )}
-                              {/* Copy + Export action bar — only on completed (non-streaming) messages */}
+                              {/* Copy + Download action bar — only on completed (non-streaming) messages */}
                               {!(streaming && i === messages.length - 1) && m.content.length > 20 && (
-                                <div className="mt-2 pt-2 border-t border-gray-100 flex items-center gap-2">
+                                <div className="mt-2 pt-2 border-t border-gray-100 flex flex-wrap items-center gap-1.5">
                                   <button
                                     onClick={() => { navigator.clipboard.writeText(m.content); setCopiedIdx(i); setTimeout(() => setCopiedIdx(null), 2000); }}
                                     className="inline-flex items-center gap-1 text-[11px] text-gray-400 hover:text-gray-700 transition px-2 py-1 rounded hover:bg-gray-100"
@@ -1390,6 +1413,18 @@ export default function Home() {
                                   >
                                     {copiedIdx === i ? <><Check size={11} className="text-green-500" /> Copied</> : <><Copy size={11} /> Copy</>}
                                   </button>
+                                  <span className="inline-flex items-center gap-1 text-[11px] text-gray-400 pl-1"><Download size={11} /> Save as</span>
+                                  {([["pdf", "PDF"], ["docx", "Word"], ["pptx", "PPTX"]] as const).map(([f, label]) => (
+                                    <button
+                                      key={f}
+                                      onClick={() => downloadMessage(m.content, f, i)}
+                                      disabled={!!dl}
+                                      title={`Download this answer as ${label}`}
+                                      className="text-[11px] text-gray-500 hover:text-indigo-700 border border-gray-200 hover:border-indigo-300 rounded px-2 py-0.5 transition disabled:opacity-40"
+                                    >
+                                      {dl === `${i}:${f}` ? "…" : label}
+                                    </button>
+                                  ))}
                                 </div>
                               )}
                             </>

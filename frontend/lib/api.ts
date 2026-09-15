@@ -232,7 +232,7 @@ export const api = {
     return req("/extract", { method: "POST", body: form });
   },
 
-  exportPaper: async (text: string, format: string, patternId = "", layout: PaperLayout | undefined = undefined): Promise<void> => {
+  exportPaper: async (text: string, format: string, patternId = "", layout: PaperLayout | undefined = undefined, filename = "illomra-paper"): Promise<void> => {
     const res = await fetch(`${BASE}/export`, {
       method: "POST",
       headers: authHeaders({ "Content-Type": "application/json" }),
@@ -251,7 +251,7 @@ export const api = {
     const blob = await res.blob();
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
-    link.download = `illomra-paper.${format}`;
+    link.download = `${(filename || "illomra-paper").replace(/[^a-z0-9._-]+/gi, "-").slice(0, 60)}.${format}`;
     document.body.appendChild(link);
     link.click();
     link.remove();
