@@ -888,22 +888,23 @@ class RAGEngine:
             # Widen — but only within the scoped document(s), never the whole mixed store.
             if sources:
                 pool = sum(counts.get(s, 0) for s in sources)
-                return min(pool or 0, 18)
+                return min(pool or 0, 40)
             pool = counts.get(source) if source else total
-            return min(pool or 0, 18) if source else min(total, 12)
+            return min(pool or 0, 40) if source else min(total, 30)
         return base_k
 
     def _response_tier(self, question: str, pattern: str):
         """Always give the LLM maximum freedom — let it decide length and depth.
         Returns (max_output_tokens, retrieval_k, length_guidance)."""
-        k = 8 if (pattern and pattern.strip()) or self._is_generative(question) else 6
+        k = 20 if (pattern and pattern.strip()) or self._is_generative(question) else 15
         return 8000, k, ""
 
     # A scoped doc-set at or under this many chunks is injected WHOLE instead of
-    # similarity-searched. Kills the "title-chunk-only retrieval" failure where a
-    # small doc is barely represented and the model answers from memory while
-    # claiming the material doesn't cover it. 60 chunks ≈ 33K chars ≈ 8K tokens.
-    FULL_DOC_CHUNK_LIMIT = 60
+    # similarity-searched, so the model reads the entire lecture (like pasting a
+    # file into AI Studio) rather than a few keyword-matched fragments. Gemini's
+    # context window is ~1M tokens, so this is generous:
+    # 300 chunks ≈ 165K chars ≈ 40K tokens — a whole lecture (or a few) fits easily.
+    FULL_DOC_CHUNK_LIMIT = 300
 
     GENERATIVE_WORDS = ("make ", "generate", "create ", "build ", "quiz", "questions",
                         "paper", "mcq", "flashcard", "test me", "worksheet", "assignment")
@@ -953,9 +954,11 @@ class RAGEngine:
                     docs = all_docs[::step][:30]
                     return docs, 80, docs[:4]
         elif owner:
-            # Unscoped but owned: a small personal corpus can also go in whole.
+            # Unscoped but owned ("All materials"): a modest personal corpus goes in
+            # WHOLE for any question — so the model sees every uploaded document, not
+            # a keyword-matched keyhole. (Above the limit we fall back to similarity.)
             total = sum(counts.values())
-            if generative and 0 < total <= self.FULL_DOC_CHUNK_LIMIT:
+            if 0 < total <= self.FULL_DOC_CHUNK_LIMIT:
                 docs = self._all_chunks(list(counts.keys()), owner=owner)
                 if docs:
                     return docs, 85, docs[:4]
