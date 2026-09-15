@@ -631,9 +631,12 @@ def link(body: UrlIn, owner: "str | None" = Depends(current_owner)):
     except HTTPException:
         raise
     except ValueError as e:
-        # Our own guard messages (bad YouTube link, SSRF rejection) — safe to show.
+        # Our own guard messages (bad YouTube link, SSRF rejection, blocked site) — safe to show.
         raise HTTPException(status_code=400, detail=str(e))
-    except Exception:
+    except Exception as e:
+        # Embedding/AI hit Google's free-tier limit — surface it honestly, not as a "bad link".
+        if _is_rate_limit_err(e) or _is_busy_err(e):
+            raise _ai_http_error(e)
         log.exception("Link ingestion failed for %r", url)
         raise HTTPException(status_code=400,
                             detail="Couldn't read that link — the site may block bots or need a login.")

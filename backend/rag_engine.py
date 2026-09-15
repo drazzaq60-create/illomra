@@ -92,12 +92,51 @@ PERSIST_DIR = os.getenv(
 # other's store (you just re-index your materials once after switching).
 EMBEDDING_PROVIDER = os.getenv("EMBEDDING_PROVIDER", "auto").strip().lower()
 GEMINI_EMBED_MODEL = os.getenv("GEMINI_EMBED_MODEL", "models/gemini-embedding-001").strip()
+# Google's free embedding tier allows ~100 items/minute. Pace sub-batches under
+# that and retry on 429 so a large document indexes instead of failing.
+_EMBED_STEP = 90
+_EMBED_PACE_S = 62
+
+
+class _ThrottledGeminiEmbeddings(GoogleGenerativeAIEmbeddings):
+    """GoogleGenerativeAIEmbeddings that respects the free tier's ~100/min cap:
+    small docs (<=90 chunks) embed in one shot; larger ones are paced so they
+    succeed slowly instead of hitting a 429 and failing the whole upload."""
+
+    def embed_documents(self, texts, **kwargs):  # type: ignore[override]
+        if len(texts) <= _EMBED_STEP:
+            return self._embed_retry(texts, **kwargs)
+        out = []
+        for i in range(0, len(texts), _EMBED_STEP):
+            if i:
+                time.sleep(_EMBED_PACE_S)  # stay under the per-minute limit
+            out.extend(self._embed_retry(texts[i:i + _EMBED_STEP], **kwargs))
+        return out
+
+    def _embed_retry(self, sub, **kwargs):
+        import re as _re
+        for attempt in range(4):
+            try:
+                return super().embed_documents(sub, **kwargs)
+            except Exception as e:
+                msg = str(e)
+                rate = "429" in msg or "RESOURCE_EXHAUSTED" in msg or "quota" in msg.lower()
+                if rate and attempt < 3:
+                    m = _re.search(r"retry in (\d+(?:\.\d+)?)s", msg)
+                    delay = min((float(m.group(1)) + 2) if m else 30.0, 45.0)
+                    log.warning("Embedding rate-limited — waiting %.0fs then retrying (attempt %d)", delay, attempt + 1)
+                    time.sleep(delay)
+                    continue
+                raise
 
 # --- Retrieval tuning ---------------------------------------------------------
-# Chunks are kept small so they fit MiniLM's 256-token window (a 1000-char chunk
-# gets its tail silently truncated and becomes unsearchable).
-CHUNK_SIZE = 550
-CHUNK_OVERLAP = 90
+# Chunk size is tuned to the embedding backend. Gemini embeddings accept ~2048
+# tokens, so we use larger chunks than the old local MiniLM (256-token) limit —
+# fewer chunks means fewer embedding calls (the free tier allows ~100/minute) and
+# richer context per chunk. Local MiniLM would truncate these, but it's only the
+# offline fallback. Override with CHUNK_SIZE if you switch back to local.
+CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "1600"))
+CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "200"))
 # Cosine relevance below this is treated as noise, EXCEPT we always keep the top
 # few so a question never comes back completely empty.
 RELEVANCE_FLOOR = 0.2
@@ -390,7 +429,7 @@ class RAGEngine:
         if provider == "google":
             if not key:
                 raise RuntimeError("EMBEDDING_PROVIDER=google requires GOOGLE_API_KEY to be set.")
-            emb = GoogleGenerativeAIEmbeddings(model=GEMINI_EMBED_MODEL, google_api_key=key)
+            emb = _ThrottledGeminiEmbeddings(model=GEMINI_EMBED_MODEL, google_api_key=key)
             return emb, "google", "illomra_gemini_embed"
 
         # Local: sentence-transformers MiniLM on CPU. "langchain" is the historical
