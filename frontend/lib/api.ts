@@ -73,7 +73,7 @@ export type QuotaModel = {
 export type QuotaSnapshot = {
   primary: string;
   models: QuotaModel[];
-  totals: { used_today: number; capacity: number; resets_in_s: number };
+  totals: { used_today: number; capacity: number; tokens_today?: number; resets_in_s: number };
 };
 
 // Visual spec of an attached format sample (from a photo) — applied at export.

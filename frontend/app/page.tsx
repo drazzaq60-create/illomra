@@ -1211,7 +1211,7 @@ export default function Home() {
         {quota && quota.totals.capacity > 0 && (
           <div className="border-t border-white/60 px-3 py-2.5">
             <div className="flex justify-between text-[11px] text-gray-500 mb-1">
-              <span>AI limit today</span>
+              <span>AI requests today</span>
               <span>≈ {quota.totals.used_today} / {quota.totals.capacity}</span>
             </div>
             <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
@@ -1221,6 +1221,12 @@ export default function Home() {
               <span>{quota.models.filter((m) => m.status === "exhausted").length > 0 ? `${quota.models.filter((m) => m.status === "exhausted").length} of ${quota.models.length} models at limit` : `${quota.models.length} models available`}</span>
               <span>resets in {fmtEta(quota.totals.resets_in_s)}</span>
             </div>
+            {typeof quota.totals.tokens_today === "number" && quota.totals.tokens_today > 0 && (
+              <div className="mt-1.5 flex justify-between items-center text-[10px] text-gray-400 border-t border-gray-100/70 pt-1.5">
+                <span>Tokens used today <span className="text-gray-300">· all models</span></span>
+                <span className="font-semibold text-indigo-600 tabular-nums">≈ {fmtNum(quota.totals.tokens_today)}</span>
+              </div>
+            )}
           </div>
         )}
         {usage && (

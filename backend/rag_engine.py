@@ -203,6 +203,18 @@ class ModelQuota:
             self._slot(model)["used"] += 1
             self._save()
 
+    def record_tokens(self, n: int):
+        """Add input+output tokens to today's running total (across all models)."""
+        if n <= 0:
+            return
+        day = self._day_key()
+        with self._lock:
+            t = self.state.setdefault("__tokens__", {})
+            if t.get("day") != day:  # new quota day — reset the token meter
+                t.clear(); t.update({"day": day, "total": 0})
+            t["total"] = int(t.get("total", 0)) + int(n)
+            self._save()
+
     def mark_limited(self, model: str, err_str: str):
         """Classify a 429: daily quota → out until the reset; else 65s cooldown."""
         now = time.time()
@@ -253,12 +265,15 @@ class ModelQuota:
                     "status": status,
                     "retry_in_s": int(max(0, max(s["cooldown_until"], 0) - now)) if status == "cooldown" else 0,
                 })
+            tok = self.state.get("__tokens__", {})
+            tokens_today = int(tok.get("total", 0)) if tok.get("day") == self._day_key() else 0
         return {
             "primary": self.chain[0] if self.chain else "",
             "models": models,
             "totals": {
                 "used_today": total_used,
                 "capacity": capacity,
+                "tokens_today": tokens_today,
                 "resets_in_s": int(self.next_reset_ts(now) - now),
             },
         }
@@ -438,6 +453,8 @@ class RAGEngine:
             # Room to spare: Gemini's thinking budget can eat a tiny max_tokens and
             # return empty text, so keep this comfortably above the title length.
             resp = self._invoke_llm(prompt, max_tokens=256)
+            um = getattr(resp, "usage_metadata", None) or {}
+            self._usage_payload(int(um.get("input_tokens", 0) or 0), int(um.get("output_tokens", 0) or 0))
             raw = self._content_text(resp.content).strip()
             if not raw:
                 return ""
@@ -1249,6 +1266,8 @@ class RAGEngine:
             self.total_output_tokens += out_tok
             session_in = self.total_input_tokens
             session_out = self.total_output_tokens
+        # Real tokens spent today across all models (every LLM path lands here).
+        _QUOTA.record_tokens(int(in_tok) + int(out_tok))
         return {
             "input_tokens": in_tok,
             "output_tokens": out_tok,
