@@ -259,6 +259,10 @@ class SummaryIn(BaseModel):
     source: str = ""
 
 
+class TitleIn(BaseModel):
+    text: str = ""
+
+
 class DeleteDocIn(BaseModel):
     source: str
 
@@ -823,6 +827,13 @@ def usage():
     Google exposes no remaining-quota API, so daily_limit values are estimates).
     The Gemini key is shared, so this is workspace-wide by design."""
     return get_engine().usage_snapshot()
+
+
+@router.post("/title")
+def title(body: TitleIn, owner: "str | None" = Depends(current_owner)):
+    """A short topic title for a conversation (Claude-style), generated once from
+    the first question so chat names read like topics, not the raw first words."""
+    return {"title": get_engine().generate_title(body.text)}
 
 
 @router.post("/reset")

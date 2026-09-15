@@ -655,6 +655,8 @@ export default function Home() {
   async function send(question: string) {
     const q = question.trim();
     if (!q || thinking || streaming) return;
+    const convoId = currentId;
+    const wasFirst = messages.length === 0; // first exchange → auto-name the chat by topic
     const history = messages.map((m) => ({ role: m.role, content: m.content }));
     setMessages((m) => [...m, { role: "user", content: q }]);
     setInput("");
@@ -750,6 +752,14 @@ export default function Home() {
       setThinkingNote("");
       setStreaming(false);
       abortRef.current = null;
+      // After the first real exchange, replace the "first words" title with a
+      // concise topic name (Claude-style). Best-effort — keep the fallback on error.
+      if (wasFirst && started) {
+        api.title(q).then((r) => {
+          const t = (r.title || "").trim();
+          if (t) setConvos((prev) => prev.map((c) => (c.id === convoId ? { ...c, title: t } : c)));
+        }).catch(() => {});
+      }
     }
   }
 

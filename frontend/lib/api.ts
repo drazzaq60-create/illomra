@@ -201,6 +201,14 @@ export const api = {
       body: JSON.stringify({ source }),
     }),
 
+  // Claude-style topic title for a conversation, generated from the first question.
+  title: (text: string): Promise<{ title: string }> =>
+    req("/title", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    }),
+
   stats: (): Promise<Stats> => req("/stats"),
 
   quota: (): Promise<QuotaSnapshot> => req("/usage"),
