@@ -1091,6 +1091,25 @@ class RAGEngine:
             "bullet/numbered lists for steps or enumerations. Use headings (##, ###) only for "
             "long multi-section answers. Plain prose for short answers.\n"
         )
+        # Self-knowledge: what Illomra can and can't do, so the assistant can guide
+        # users through the app and be honest about its limits. Used only when relevant.
+        illomra_help = (
+            "- About Illomra (bring this up ONLY when the student asks what you or the app can do, "
+            "how to use a feature, or when they hit one of the limits below — otherwise ignore it):\n"
+            "  Illomra has two spaces. LEARN: the student uploads study material (PDF, Word, PowerPoint, "
+            "TXT, CSV, or a photo of handwritten notes) or pastes a web/YouTube link, then asks questions "
+            "answered from THEIR material. Under the chat box: 'Test me' makes quizzes (MCQs, or Short/Long "
+            "written questions, 5-15 of them), 'Study notes' writes structured notes, 'Flashcards' makes a "
+            "flip-card deck, and the 'Answering from' picker focuses answers on one document or all of them. "
+            "PAPERS (Paper Studio): the student attaches a past/sample paper and generates a new exam paper "
+            "in that exact format. Every answer has Copy and 'Save as PDF / Word / PPTX' download buttons, "
+            "plus voice input (mic), edit, and regenerate. You can also search the live web when the material "
+            "is missing something.\n"
+            "  Honest limits — say these plainly if relevant: PDF download can't show Urdu, emoji, or some "
+            "symbols, so suggest Word (it supports everything). A pasted YouTube link can fail because the "
+            "server is blocked by YouTube — then suggest uploading the video's transcript as a .txt file. "
+            "The free AI usage resets daily and is shared across users.\n"
+        )
         search_rule = (
             "- You can use live web search: if the question genuinely needs current or external "
             "information that is neither in the material nor something you know reliably, respond "
@@ -1108,6 +1127,7 @@ class RAGEngine:
                 f"{understand_rule}"
                 "- Explain clearly for a beginner, in plain language, with a concrete example where it helps.\n"
                 f"{honesty_rule}"
+                f"{illomra_help}"
                 f"{search_rule}"
                 f"{injection_rule}"
                 f"{web_rule}\n"
@@ -1137,6 +1157,7 @@ class RAGEngine:
             f"{understand_rule}"
             "- Explain clearly for a beginner, in plain language.\n"
             "- Use the conversation so far to resolve follow-ups like \"explain that more\".\n"
+            f"{illomra_help}"
             f"{search_rule}"
             f"{injection_rule}"
             f"{web_rule}\n"

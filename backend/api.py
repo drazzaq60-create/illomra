@@ -408,10 +408,14 @@ def _paper_to_bytes(text: str, fmt: str, layout: dict = None, pattern_path: str 
             "“": '"', "”": '"', "…": "...", " ": " ",
             "•": "-", "→": "->", "×": "x", "−": "-",
         }))
-        try:
-            text.encode("latin-1")
-        except UnicodeEncodeError:
-            raise ValueError("PDF export can't render Urdu or special characters yet — download as Word instead (full support).")
+        # The core PDF font is Latin-1 only. Drop any leftover characters it can't
+        # draw (emoji, stray symbols) so a normal English document still exports;
+        # only refuse when stripping would gut the text (e.g. an Urdu/Arabic/CJK
+        # document), which would otherwise produce a near-empty PDF.
+        stripped = text.encode("latin-1", "ignore").decode("latin-1")
+        if (len(text) - len(stripped)) > max(12, int(len(text) * 0.08)):
+            raise ValueError("PDF export can't render this text (it looks like Urdu or another non-Latin script) — download as Word instead, which supports everything.")
+        text = stripped
         from fpdf import FPDF
         from fpdf.enums import XPos, YPos
 
@@ -437,8 +441,12 @@ def _paper_to_bytes(text: str, fmt: str, layout: dict = None, pattern_path: str 
         def _line(t, size, style="", align="L"):
             pdf.set_font(family, style, size)
             pdf.set_x(pdf.l_margin)
-            # Strip markdown formatting symbols for clean PDF rendering
+            # Strip markdown formatting symbols for clean PDF rendering, then drop
+            # any character the Latin-1 core font can't draw (belt-and-suspenders:
+            # the source text is already stripped, but rendering can re-introduce
+            # symbols like a bullet glyph).
             clean_t = t.replace("**", "").replace("*", "").replace("`", "")
+            clean_t = clean_t.encode("latin-1", "ignore").decode("latin-1")
             pdf.multi_cell(pdf.epw, size * 0.55, clean_t, align=align,
                            new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
@@ -484,7 +492,7 @@ def _paper_to_bytes(text: str, fmt: str, layout: dict = None, pattern_path: str 
             elif st.startswith("# "):
                 _line(st[2:], 16, "B", centered)
             elif st.startswith(("- ", "* ", "+ ")):
-                _line("   • " + st[2:], 11, "", centered)
+                _line("   - " + st[2:], 11, "", centered)
             elif re.match(r'^\d+\.\s+', st):
                 _line("   " + st, 11, "", centered)
             else:
