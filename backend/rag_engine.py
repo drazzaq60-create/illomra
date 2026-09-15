@@ -801,33 +801,60 @@ class RAGEngine:
         self.delete_document(source, owner=owner)
         return self._index(chunks)
 
-    def process_url(self, url: str, owner: Optional[str] = None) -> int:
-        _assert_safe_url(url)
+    # A real browser fingerprint — many sites reject non-browser user agents.
+    _WEB_HEADERS = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                      "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+
+    def _fetch_page_text(self, url: str, max_redirects: int = 5):
+        """Fetch a public web page and return its readable text. Redirects are
+        followed MANUALLY, re-validating every hop against the SSRF guard so a
+        'safe' public URL still can't bounce us onto an internal address."""
+        import requests
+        from urllib.parse import urljoin
         try:
-            from langchain_community.document_loaders import WebBaseLoader
+            from bs4 import BeautifulSoup
         except ImportError:
             raise Exception("Reading web links needs 'beautifulsoup4' (pip install beautifulsoup4).")
-        loader = WebBaseLoader(url)
-        loader.requests_kwargs = {
-            "headers": {"User-Agent": "Mozilla/5.0 (compatible; StudyMind/1.0)"},
-            "timeout": 20,
-            # No redirects: a "safe" public URL must not be able to bounce us
-            # to an internal address after the SSRF check.
-            "allow_redirects": False,
-        }
-        try:
-            docs = loader.load()
-        except Exception as e:
-            raise Exception(f"Couldn't open that page: {e}")
-        docs = [d for d in docs if d.page_content and d.page_content.strip()]
-        if not docs:
-            raise Exception("No readable text found — the page may block bots or need a login.")
-        for d in docs:
-            d.metadata.setdefault("page", "Web page")
-        self._stamp(docs, url, owner)
-        chunks = self.splitter.split_documents(docs)
+        cur = url
+        for _ in range(max_redirects + 1):
+            _assert_safe_url(cur)  # validate BEFORE each fetch (across redirects)
+            try:
+                r = requests.get(cur, headers=self._WEB_HEADERS, timeout=20, allow_redirects=False)
+            except Exception:
+                raise ValueError("Couldn't reach that page (timeout or connection error). "
+                                 "Check the link, or save the content as a PDF and upload it instead.")
+            if r.status_code in (301, 302, 303, 307, 308) and r.headers.get("Location"):
+                cur = urljoin(cur, r.headers["Location"])
+                continue
+            if r.status_code in (401, 403):
+                raise ValueError("That site blocked the request — it likely blocks automated access "
+                                 "from servers, or needs a login. Save the page as a PDF and upload it instead.")
+            if r.status_code == 404:
+                raise ValueError("That page wasn't found (404) — double-check the link.")
+            if r.status_code >= 400:
+                raise ValueError(f"That site returned an error (HTTP {r.status_code}). "
+                                 "Try a different link, or upload the content as a file.")
+            soup = BeautifulSoup(r.text, "html.parser")
+            for tag in soup(["script", "style", "nav", "footer", "header", "noscript", "svg"]):
+                tag.decompose()
+            return soup.get_text(" ", strip=True)
+        raise ValueError("That link redirected too many times — try the final URL directly.")
+
+    def process_url(self, url: str, owner: Optional[str] = None) -> int:
+        _assert_safe_url(url)
+        text = self._fetch_page_text(url)
+        if not text or len(text.strip()) < 40:
+            raise ValueError("That page had almost no readable text — it may be login-gated or built "
+                             "entirely with JavaScript. Save it as a PDF and upload that instead.")
+        doc = Document(page_content=text, metadata={"page": "Web page"})
+        self._stamp([doc], url, owner)
+        chunks = self.splitter.split_documents([doc])
         if not chunks:
-            raise Exception("No readable text found on that page.")
+            raise ValueError("That page had no readable text to index.")
         self.delete_document(url, owner=owner)
         return self._index(chunks)
 
