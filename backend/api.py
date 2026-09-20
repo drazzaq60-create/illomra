@@ -34,7 +34,7 @@ load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 from fastapi import (APIRouter, Depends, FastAPI, File, Header, HTTPException,
                      Request, Response, UploadFile)
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from rag_engine import RAGEngine, extract_video_id
@@ -65,6 +65,132 @@ os.makedirs(PATTERN_DIR, exist_ok=True)
 GOOGLE_OAUTH_CLIENT_ID = os.getenv("GOOGLE_OAUTH_CLIENT_ID", "").strip()
 APP_ACCESS_TOKEN = os.getenv("APP_ACCESS_TOKEN", "").strip()
 AUTH_MODE = "google" if GOOGLE_OAUTH_CLIENT_ID else ("token" if APP_ACCESS_TOKEN else "open")
+
+# Password for the read-only owner analytics dashboard at /admin. Unset = the
+# dashboard is disabled (endpoints refuse). Never overlaps with user auth.
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "").strip()
+
+_ADMIN_HTML = """<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Illomra · Analytics</title>
+<style>
+  :root{--bg:#0f1017;--card:#181a24;--ink:#eceaf2;--muted:#9a97a6;--line:#262838;
+        --indigo:#818cf8;--violet:#a78bfa;--emerald:#34d399;}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:radial-gradient(60rem 60rem at 100% -10%,rgba(129,140,248,.14),transparent 60%),
+       radial-gradient(50rem 50rem at -10% 110%,rgba(167,139,250,.12),transparent 60%),var(--bg);
+       color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",sans-serif;min-height:100vh}
+  .wrap{max-width:1000px;margin:0 auto;padding:28px 18px 60px}
+  .gate{min-height:100vh;display:flex;align-items:center;justify-content:center}
+  .gatebox{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:34px 30px;width:100%;max-width:360px;text-align:center}
+  .logo{width:52px;height:52px;margin:0 auto 12px;display:block}
+  h1{font-size:20px;font-weight:700;letter-spacing:-.3px}
+  .sub{color:var(--muted);font-size:13px;margin:6px 0 20px}
+  input{width:100%;background:#11131b;border:1px solid var(--line);border-radius:11px;color:var(--ink);
+        padding:12px 14px;font-size:14px;outline:none}
+  input:focus{border-color:var(--indigo)}
+  button{width:100%;margin-top:12px;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border:0;
+         border-radius:11px;padding:12px;font-size:14px;font-weight:600;cursor:pointer}
+  button:hover{filter:brightness(1.08)}
+  .err{color:#f87171;font-size:13px;margin-top:12px;min-height:16px}
+  header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:22px}
+  .brand{display:flex;align-items:center;gap:10px}
+  .brand b{font-size:19px;letter-spacing:-.3px}
+  .brand span{color:var(--muted);font-size:12px}
+  .tools{display:flex;gap:8px}
+  .tbtn{background:var(--card);border:1px solid var(--line);color:var(--muted);border-radius:9px;
+        padding:7px 13px;font-size:12.5px;cursor:pointer;width:auto;margin:0}
+  .tbtn:hover{color:var(--ink);border-color:var(--indigo);filter:none;background:var(--card)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:22px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px}
+  .card .n{font-size:30px;font-weight:800;letter-spacing:-1px;
+          background:linear-gradient(120deg,var(--indigo),var(--violet));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .card .l{color:var(--muted);font-size:12px;margin-top:4px;text-transform:uppercase;letter-spacing:.6px}
+  .aibar{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 18px;margin-bottom:22px;
+        display:flex;gap:22px;flex-wrap:wrap;font-size:13px;color:var(--muted)}
+  .aibar b{color:var(--ink)}
+  .sec{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:1px;margin:0 0 10px}
+  .tablewrap{background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:auto}
+  table{width:100%;border-collapse:collapse;font-size:13px;min-width:560px}
+  th{text-align:right;color:var(--muted);font-weight:600;padding:11px 14px;border-bottom:1px solid var(--line);font-size:11px;text-transform:uppercase;letter-spacing:.5px}
+  th:first-child,td:first-child{text-align:left}
+  td{padding:10px 14px;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums}
+  tr:last-child td{border-bottom:0}
+  td.u{font-family:ui-monospace,monospace;color:var(--indigo)}
+  .foot{color:#5b5966;font-size:11px;margin-top:16px;text-align:center}
+  [hidden]{display:none!important}
+</style></head><body>
+<div id="gate" class="gate"><div class="gatebox">
+  <svg class="logo" viewBox="0 0 40 40"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6366f1"/><stop offset="1" stop-color="#8b5cf6"/></linearGradient></defs><rect x="1.5" y="1.5" width="37" height="37" rx="11" fill="url(#g)"/><path d="M10.5 27.5c3.4-1.8 6.6-1.8 9.5-.2V15.2c-2.9-1.6-6.1-1.6-9.5.2z" fill="#fff" opacity=".96"/><path d="M29.5 27.5c-3.4-1.8-6.6-1.8-9.5-.2V15.2c2.9-1.6 6.1-1.6 9.5.2z" fill="#fff" opacity=".78"/><circle cx="20" cy="9.6" r="2.3" fill="#fbbf24"/></svg>
+  <h1>Illomra Analytics</h1>
+  <div class="sub">Private dashboard — enter the password.</div>
+  <input id="pw" type="password" placeholder="Password" autocomplete="current-password">
+  <button id="go">View dashboard</button>
+  <div class="err" id="err"></div>
+</div></div>
+
+<div id="app" class="wrap" hidden>
+  <header>
+    <div class="brand">
+      <svg width="30" height="30" viewBox="0 0 40 40"><defs><linearGradient id="g2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6366f1"/><stop offset="1" stop-color="#8b5cf6"/></linearGradient></defs><rect x="1.5" y="1.5" width="37" height="37" rx="11" fill="url(#g2)"/><path d="M10.5 27.5c3.4-1.8 6.6-1.8 9.5-.2V15.2c-2.9-1.6-6.1-1.6-9.5.2z" fill="#fff" opacity=".96"/><path d="M29.5 27.5c-3.4-1.8-6.6-1.8-9.5-.2V15.2c2.9-1.6 6.1-1.6 9.5.2z" fill="#fff" opacity=".78"/><circle cx="20" cy="9.6" r="2.3" fill="#fbbf24"/></svg>
+      <div><b>Illomra</b> <span>· Analytics</span></div>
+    </div>
+    <div class="tools"><button class="tbtn" id="refresh">↻ Refresh</button><button class="tbtn" id="out">Sign out</button></div>
+  </header>
+  <div class="grid" id="cards"></div>
+  <div class="aibar" id="aibar"></div>
+  <div class="sec">Per-user activity <span style="text-transform:none;letter-spacing:0">· anonymized</span></div>
+  <div class="tablewrap"><table><thead><tr>
+    <th>User</th><th>Chats</th><th>Messages</th><th>Questions</th><th>Docs</th><th>Quizzes</th><th>Papers</th>
+  </tr></thead><tbody id="rows"></tbody></table></div>
+  <div class="foot" id="foot"></div>
+</div>
+
+<script>
+  var pwKey="illomra_admin_pw";
+  var $=function(id){return document.getElementById(id)};
+  function num(n){n=n||0;return n>=1e6?(n/1e6).toFixed(1)+"M":n>=1e3?(n/1e3).toFixed(1)+"K":String(n)}
+  function fmtEta(s){s=s||0;var h=Math.floor(s/3600),m=Math.round((s%3600)/60);return h>0?h+"h "+m+"m":m+"m"}
+
+  function load(pw){
+    return fetch("/admin/analytics",{headers:{Authorization:"Bearer "+pw}}).then(function(r){
+      if(r.status===401){throw new Error("Wrong password.");}
+      if(!r.ok){throw new Error("Error "+r.status);}
+      return r.json();
+    });
+  }
+  function render(d){
+    var t=d.totals||{};
+    var cards=[["Users",t.users],["Documents",t.documents],["Conversations",t.convos],
+               ["Messages",t.messages],["Questions asked",t.questions],["Quizzes",t.quizzes],
+               ["Papers",t.papers],["Flashcards",t.flashcards]];
+    $("cards").innerHTML=cards.map(function(c){return '<div class="card"><div class="n">'+num(c[1])+'</div><div class="l">'+c[0]+'</div></div>'}).join("");
+    var a=d.ai||{};
+    $("aibar").innerHTML='<span>AI tokens today: <b>'+num(a.tokens_today)+'</b></span>'+
+      '<span>AI requests today: <b>'+num(a.requests_today)+'</b> / '+num(a.capacity)+'</span>'+
+      '<span>Quota resets in <b>'+fmtEta(a.resets_in_s)+'</b></span>'+
+      '<span>Indexed chunks: <b>'+num(t.chunks)+'</b></span>';
+    var rows=(d.users||[]);
+    $("rows").innerHTML = rows.length ? rows.map(function(u){
+      return '<tr><td class="u">'+u.user+'</td><td>'+num(u.convos)+'</td><td>'+num(u.messages)+
+             '</td><td>'+num(u.questions)+'</td><td>'+num(u.documents)+'</td><td>'+num(u.quizzes)+
+             '</td><td>'+num(u.papers)+'</td></tr>'}).join("")
+      : '<tr><td colspan="7" style="color:#5b5966;text-align:center;padding:22px">No activity yet.</td></tr>';
+    var when=new Date((d.generated_at||0)*1000);
+    $("foot").textContent="Updated "+when.toLocaleString()+" · read-only · counts only, no personal data";
+  }
+  function show(pw){
+    load(pw).then(function(d){
+      try{sessionStorage.setItem(pwKey,pw);}catch(e){}
+      $("gate").hidden=true;$("app").hidden=false;render(d);
+    }).catch(function(e){ $("err").textContent=e.message; });
+  }
+  $("go").addEventListener("click",function(){var p=$("pw").value.trim();if(p)show(p);});
+  $("pw").addEventListener("keydown",function(e){if(e.key==="Enter")$("go").click();});
+  $("refresh").addEventListener("click",function(){var p="";try{p=sessionStorage.getItem(pwKey)||"";}catch(e){}if(p)load(p).then(render);});
+  $("out").addEventListener("click",function(){try{sessionStorage.removeItem(pwKey);}catch(e){}$("app").hidden=true;$("gate").hidden=false;$("pw").value="";});
+  (function(){var p="";try{p=sessionStorage.getItem(pwKey)||"";}catch(e){}if(p)show(p);else $("pw").focus();})();
+</script></body></html>"""
 
 # Server-side conversation store — deployed users must not depend on one
 # browser's localStorage. Point at the persistent volume in production.
@@ -598,6 +724,101 @@ def health():
         "chunks": eng.chunk_count,
         "store_ok": not eng.store_error,
     }
+
+
+# ---- Read-only owner analytics (password-protected, additive) -----------------
+# These routes are registered on the app directly (NOT the auth-gated router) and
+# only READ data the app already writes. They never touch the chat/upload flows.
+
+def _collect_analytics() -> "dict":
+    """Aggregate usage from the conversation store + the engine's per-owner doc
+    counts. User ids are hashed to short labels — no emails/ids are exposed."""
+    import glob
+    import hashlib
+    users: "dict[str, dict]" = {}
+
+    def U(uid: str) -> dict:
+        return users.setdefault(uid, {
+            "convos": 0, "messages": 0, "questions": 0,
+            "quizzes": 0, "papers": 0, "flashcards": 0, "documents": 0, "chunks": 0,
+        })
+
+    convo_dir = CONVO_STORE + ".d"
+    if os.path.isdir(convo_dir):
+        for fp in glob.glob(os.path.join(convo_dir, "*.json")):
+            uid = os.path.splitext(os.path.basename(fp))[0]
+            u = U(uid)
+            try:
+                with open(fp, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                convos = data.get("convos", []) if isinstance(data, dict) else (data or [])
+            except Exception:
+                convos = []
+            u["convos"] += len(convos)
+            for c in convos:
+                msgs = c.get("messages", []) or []
+                u["messages"] += len(msgs)
+                for m in msgs:
+                    if m.get("role") == "user":
+                        u["questions"] += 1
+                    t = m.get("type")
+                    if t == "quiz":
+                        u["quizzes"] += 1
+                    elif t == "paper":
+                        u["papers"] += 1
+                    elif t == "flashcards":
+                        u["flashcards"] += 1
+
+    try:
+        eng = get_engine()
+        for owner, srcmap in (getattr(eng, "owner_counts", {}) or {}).items():
+            safe = "".join(ch for ch in owner if ch.isalnum())[:64] or "unknown"
+            u = U(safe)
+            u["documents"] += len(srcmap)
+            u["chunks"] += sum(srcmap.values())
+    except Exception:
+        log.exception("analytics: engine doc counts unavailable")
+
+    rows = []
+    for uid, u in users.items():
+        label = "user_" + hashlib.sha256(uid.encode()).hexdigest()[:6]
+        rows.append({"user": label, **u})
+    rows.sort(key=lambda r: r["messages"] + r["documents"] * 3 + r["questions"], reverse=True)
+
+    totals = {k: sum(u[k] for u in users.values())
+              for k in ("convos", "messages", "questions", "quizzes", "papers", "flashcards", "documents", "chunks")}
+    totals["users"] = len(users)
+
+    ai = {"tokens_today": 0, "requests_today": 0, "capacity": 0, "resets_in_s": 0}
+    try:
+        t = get_engine().usage_snapshot().get("totals", {})
+        ai = {
+            "tokens_today": t.get("tokens_today", 0),
+            "requests_today": t.get("used_today", 0),
+            "capacity": t.get("capacity", 0),
+            "resets_in_s": t.get("resets_in_s", 0),
+        }
+    except Exception:
+        pass
+
+    return {"totals": totals, "users": rows[:300], "ai": ai, "generated_at": int(time.time())}
+
+
+def _check_admin(authorization: str) -> None:
+    supplied = authorization.removeprefix("Bearer ").strip() if authorization else ""
+    if not ADMIN_TOKEN or not secrets.compare_digest(supplied, ADMIN_TOKEN):
+        raise HTTPException(status_code=401, detail="Wrong password.")
+
+
+@app.get("/admin/analytics")
+def admin_analytics(authorization: str = Header(default="")):
+    _check_admin(authorization)
+    return _collect_analytics()
+
+
+@app.get("/admin", response_class=HTMLResponse)
+def admin_page():
+    return HTMLResponse(_ADMIN_HTML)
 
 
 @router.post("/upload")
