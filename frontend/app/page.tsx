@@ -1134,6 +1134,9 @@ export default function Home() {
               <span className="text-xs font-semibold text-emerald-700 inline-flex items-center gap-1.5"><BookOpen size={13} /> My materials <span className="font-normal text-emerald-600/70">· {docs.length}</span></span>
               <button onClick={() => setShowAdd((v) => !v)} className="text-[11px] font-medium text-emerald-700 hover:text-emerald-600 px-1.5 py-0.5 rounded border border-emerald-200 bg-white/70">{showAdd ? "Close" : "+ Add"}</button>
             </div>
+            <div className="text-[10px] leading-snug text-amber-700/90 bg-amber-50 border border-amber-200/70 rounded-md px-2 py-1 mb-2">
+              ⓘ Free hosting: uploaded documents may reset when the server restarts — just re-upload if they disappear. Your chats stay saved.
+            </div>
             {showAdd && (
               <div className="space-y-1.5 mb-2">
                 <label className={`block rounded-xl border-2 border-dashed p-2.5 text-center cursor-pointer text-xs transition bg-white/70 ${busy ? "opacity-50 pointer-events-none" : "border-emerald-300 text-gray-600 hover:border-emerald-400 hover:bg-emerald-50/60"}`}>

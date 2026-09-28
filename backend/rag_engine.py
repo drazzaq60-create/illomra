@@ -33,8 +33,10 @@ from urllib.parse import urlparse
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_chroma import Chroma
-from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
+# HuggingFaceEmbeddings (offline fallback) is imported lazily in _make_embeddings —
+# its heavy deps (sentence-transformers/torch) aren't installed in the default
+# deployment, which uses Google embeddings, so the image stays small.
 from langchain_core.messages import HumanMessage
 from langchain_core.documents import Document
 
@@ -432,8 +434,17 @@ class RAGEngine:
             emb = _ThrottledGeminiEmbeddings(model=GEMINI_EMBED_MODEL, google_api_key=key)
             return emb, "google", "illomra_gemini_embed"
 
-        # Local: sentence-transformers MiniLM on CPU. "langchain" is the historical
-        # default collection name, kept so any existing local store still loads.
+        # Local: sentence-transformers MiniLM on CPU. Imported lazily — these deps
+        # are NOT installed in the default (Google-embeddings) deployment, so the
+        # image stays small enough for free hosting.
+        try:
+            from langchain_huggingface import HuggingFaceEmbeddings
+        except ImportError:
+            raise RuntimeError(
+                "EMBEDDING_PROVIDER=local needs 'langchain-huggingface' and "
+                "'sentence-transformers', which aren't installed here. Set a "
+                "GOOGLE_API_KEY to use Google embeddings instead."
+            )
         emb = HuggingFaceEmbeddings(
             model_name="sentence-transformers/all-MiniLM-L6-v2",
             model_kwargs={"device": "cpu"},

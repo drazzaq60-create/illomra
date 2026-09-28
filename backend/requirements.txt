@@ -1,11 +1,13 @@
-# StudyMind backend dependencies (FastAPI + LangChain 0.3 + Gemini)
+# Illomra backend dependencies (FastAPI + LangChain 0.3 + Gemini)
+# Embeddings run on Google's API (gemini-embedding-001), so the heavy local
+# stack (sentence-transformers + torch, ~2GB) is intentionally NOT installed —
+# this keeps the image small enough for free hosting. Set EMBEDDING_PROVIDER=local
+# and add langchain-huggingface + sentence-transformers only if you need offline.
 langchain>=0.3
 langchain-community>=0.3
-langchain-huggingface>=0.1
 langchain-google-genai>=2.0
 langchain-chroma>=0.1
 chromadb>=0.5.3
-sentence-transformers>=3.0
 pypdf>=4.3
 python-dotenv>=1.0
 youtube-transcript-api>=1.0.0
